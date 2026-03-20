@@ -153,7 +153,14 @@ tasks {
         // The pluginVersion is based on the SemVer (https://semver.org) and supports pre-release labels, like 2.1.7-alpha.3
         // Specify pre-release label to publish the plugin in a custom Release Channel automatically. Read more:
         // https://plugins.jetbrains.com/docs/intellij/deployment.html#specifying-a-release-channel
-        channels = properties("pluginVersion").map { listOf(it.split('-').getOrElse(1) { "default" }.split('.').first()) }
+        val pluginVersion = providers.gradleProperty("pluginVersion").get()
+        channels.set(
+            listOf(
+                pluginVersion
+                    .substringAfter("-", "default")
+                    .substringBefore(".")
+            )
+        )
     }
 
     // Extends the 'jar' task to include 'implementation' dependencies in the output JAR.
