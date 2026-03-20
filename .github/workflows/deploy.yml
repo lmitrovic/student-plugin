@@ -8,29 +8,42 @@ on:
 
 jobs:
   deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
+
     defaults:
       run:
         working-directory: ./IntelliJ-Plugin
-    env:
-      PRODUCTION_SERVER_USERNAME: ${{ secrets.PRODUCTION_SERVER_USERNAME }}
-      PRODUCTION_SERVER_PASSWORD: ${{ secrets.PRODUCTION_SERVER_PASSWORD }}
-      PRODUCTION_SERVER_HOST: ${{ secrets.PRODUCTION_SERVER_HOST }}
+
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
+      # 1. MORAŠ imati Javu instaliranu na runner-u da bi gradlew radio
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
 
+      # 2. Rešava "Permission denied" za gradlew
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      # 3. Build (sada će naći GradleWrapperMain jer smo u IntelliJ-Plugin folderu)
       - name: Build plugin
         run: ./gradlew buildPlugin
 
       - name: Copy build to server
         uses: appleboy/scp-action@v0.1.5
         with:
-          host: ${{ env.PRODUCTION_SERVER_HOST }}
-          username: ${{ env.PRODUCTION_SERVER_USERNAME }}
+          host: ${{ secrets.PRODUCTION_SERVER_HOST }}
+          username: ${{ secrets.PRODUCTION_SERVER_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: build/distributions/*.zip
-          target: /var/www/intellij-plugins/
+          # Putanja do ZIP-a iz korena repozitorijuma
+          source: "IntelliJ-Plugin/build/distributions/*.zip"
+          target: "/var/www/intellij-plugins/"
+          strip_components: 2 # Ovo skida folder "IntelliJ-Plugin/build/distributions/" na serveru
 
       - name: Update updatePlugins.xml
         uses: appleboy/ssh-action@v0.1.7
@@ -39,17 +52,18 @@ jobs:
           username: ${{ secrets.PRODUCTION_SERVER_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # Pronađi najnoviji ZIP fajl
-            LATEST_ZIP=$(ls -t /var/www/intellij-plugins/build/distributions/nastavnicki-plugin-*.zip | head -n 1)
+            # Putanja gde SCP spušta fajlove
+            BASE_DIR="/var/www/intellij-plugins"
+            LATEST_ZIP=$(ls -t $BASE_DIR/*.zip | head -n 1)
             
-            # Ekstrahuj verziju (ispravka za grešku u varijabli: LATEST_ZIP umesto LATEST_ZIP)
-            VERSION=$(basename "$LATEST_ZIP" | sed -E 's/nastavnicki-plugin-(.*)\.zip/\1/')
+            if [ -z "$LATEST_ZIP" ]; then echo "ZIP not found"; exit 1; fi
             
-            # URL za novi plugin
-            PLUGIN_URL="http://157.180.37.247/build/distributions/$(basename "$LATEST_ZIP")"
+            FILENAME=$(basename "$LATEST_ZIP")
+            VERSION=$(echo "$FILENAME" | sed -E 's/nastavnicki-plugin-(.*)\.zip/\1/')
+            PLUGIN_URL="http://157.180.37.247/build/distributions/$FILENAME"
             
-            # Privremeni XML fajl
             TEMP_XML="/tmp/updatePlugins_temp.xml"
+            ORIGINAL_XML="$BASE_DIR/updatePlugins.xml"
             
             # Ažuriraj XML
             xmlstarlet ed \
@@ -67,8 +81,6 @@ jobs:
               --insert "/plugins/plugin[last()]/vendor" --type attr -n "url" -v "https://raf.edu.rs" \
               --subnode "/plugins/plugin[last()]" --type elem -n "icon" \
               --insert "/plugins/plugin[last()]/icon" --type attr -n "url" -v "http://157.180.37.247/pluginIcon.svg" \
-              /var/www/intellij-plugins/updatePlugins.xml > "$TEMP_XML"
+              "$ORIGINAL_XML" > "$TEMP_XML"
             
-            # Zameni originalni fajl
-            mv "$TEMP_XML" /var/www/intellij-plugins/updatePlugins.xml
-            rm -f "$TEMP_XML"
+            mv "$TEMP_XML" "$ORIGINAL_XML"
