@@ -1,0 +1,86 @@
+name: Deploy Plugin
+
+on:
+  workflow_run:
+    workflows: ["Bump Plugin Version"]
+    types:
+      - completed
+
+jobs:
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./IntelliJ-Plugin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. MORAŠ imati Javu instaliranu na runner-u da bi gradlew radio
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      # 2. Rešava "Permission denied" za gradlew
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      # 3. Build (sada će naći GradleWrapperMain jer smo u IntelliJ-Plugin folderu)
+      - name: Build plugin
+        run: ./gradlew buildPlugin
+
+      - name: Copy build to server
+        uses: appleboy/scp-action@v0.1.5
+        with:
+          host: ${{ secrets.PRODUCTION_SERVER_HOST }}
+          username: ${{ secrets.PRODUCTION_SERVER_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          # Putanja do ZIP-a iz korena repozitorijuma
+          source: "IntelliJ-Plugin/build/distributions/*.zip"
+          target: "/var/www/intellij-plugins/"
+          strip_components: 2 # Ovo skida folder "IntelliJ-Plugin/build/distributions/" na serveru
+
+      - name: Update updatePlugins.xml
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.PRODUCTION_SERVER_HOST }}
+          username: ${{ secrets.PRODUCTION_SERVER_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # Putanja gde SCP spušta fajlove
+            BASE_DIR="/var/www/intellij-plugins"
+            LATEST_ZIP=$(ls -t $BASE_DIR/*.zip | head -n 1)
+            
+            if [ -z "$LATEST_ZIP" ]; then echo "ZIP not found"; exit 1; fi
+            
+            FILENAME=$(basename "$LATEST_ZIP")
+            VERSION=$(echo "$FILENAME" | sed -E 's/nastavnicki-plugin-(.*)\.zip/\1/')
+            PLUGIN_URL="http://157.180.37.247/build/distributions/$FILENAME"
+            
+            TEMP_XML="/tmp/updatePlugins_temp.xml"
+            ORIGINAL_XML="$BASE_DIR/updatePlugins.xml"
+            
+            # Ažuriraj XML
+            xmlstarlet ed \
+              --subnode "/plugins" --type elem -n "plugin" -v "" \
+              --insert "/plugins/plugin[last()]" --type attr -n "id" -v "com.raf.nastavnicki" \
+              --insert "/plugins/plugin[last()]" --type attr -n "url" -v "$PLUGIN_URL" \
+              --insert "/plugins/plugin[last()]" --type attr -n "version" -v "$VERSION" \
+              --subnode "/plugins/plugin[last()]" --type elem -n "name" -v "Nastavnički Plugin - RAF" \
+              --subnode "/plugins/plugin[last()]" --type elem -n "description" -v "Plugin za nastavnike u IntelliJ-u" \
+              --subnode "/plugins/plugin[last()]" --type elem -n "idea-version" \
+              --insert "/plugins/plugin[last()]/idea-version" --type attr -n "since-build" -v "241.0" \
+              --insert "/plugins/plugin[last()]/idea-version" --type attr -n "until-build" -v "999.*" \
+              --subnode "/plugins/plugin[last()]" --type elem -n "vendor" \
+              --insert "/plugins/plugin[last()]/vendor" --type attr -n "email" -v "zarkoned@outlook.com" \
+              --insert "/plugins/plugin[last()]/vendor" --type attr -n "url" -v "https://raf.edu.rs" \
+              --subnode "/plugins/plugin[last()]" --type elem -n "icon" \
+              --insert "/plugins/plugin[last()]/icon" --type attr -n "url" -v "http://157.180.37.247/pluginIcon.svg" \
+              "$ORIGINAL_XML" > "$TEMP_XML"
+            
+            mv "$TEMP_XML" "$ORIGINAL_XML"
