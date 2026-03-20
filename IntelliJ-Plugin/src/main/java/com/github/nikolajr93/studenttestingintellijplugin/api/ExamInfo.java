@@ -3,6 +3,7 @@ package com.github.nikolajr93.studenttestingintellijplugin.api;
 public class ExamInfo {
     private String taskGroup;
     private String classroom;
+    //
 
     public ExamInfo() {}
 

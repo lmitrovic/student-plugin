@@ -1,0 +1,74 @@
+name: Bump Plugin Version
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [prod]
+
+jobs:
+  bump-version:
+
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: prod  # Checkout prod granu
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+
+      - name: Bump patch version
+        run: |
+          echo "=== DEBUG ==="
+          echo "Working directory: $(pwd)"
+          ls -la
+          echo "--- File content ---"
+          cat gradle.properties
+          echo "-------------------"
+          
+          python -c "
+          import re
+          path = 'gradle.properties'
+          
+          print(f'[DEBUG] Opening file: {path}')
+          with open(path) as f:
+            lines = f.readlines()
+            print(f'[DEBUG] Original content:\\n{lines}')
+          
+          version_updated = False
+          for i, line in enumerate(lines):
+            if line.strip().startswith('pluginVersion'):
+              print(f'[DEBUG] Found version line: {line.strip()}')
+              match = re.search(r'(\d+)\.(\d+)\.(\d+)', line)
+              if match:
+                v = match.groups()
+                new = f'{v[0]}.{v[1]}.{int(v[2])+1}'
+                lines[i] = f'pluginVersion = {new}\n'
+                print(f'[DEBUG] Updated to: {new}')
+                version_updated = True
+          
+          if version_updated:
+            with open(path, 'w') as f:
+              f.writelines(lines)
+            print('[DEBUG] File successfully updated')
+          else:
+            print('[DEBUG] No version line found or version not updated')
+            exit(1)
+          "
+          
+          echo "=== Updated file ==="
+          cat gradle.properties
+
+      - name: Commit and push changes
+        if: success()
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'Bump pluginVersion after merge to prod'
+          branch: prod  # Push na prod granu
+          token: ${{ secrets.GITHUB_TOKEN }}
