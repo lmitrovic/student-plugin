@@ -16,11 +16,6 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Create config.properties
-        run: |
-          mkdir -p src/main/resources
-          echo "api.url=${{ secrets.API_URL }}" > src/main/resources/config.properties
-          echo "api.token=${{ secrets.API_TOKEN }}" >> src/main/resources/config.properties
 
       - name: Build plugin
         run: ./gradlew buildPlugin
