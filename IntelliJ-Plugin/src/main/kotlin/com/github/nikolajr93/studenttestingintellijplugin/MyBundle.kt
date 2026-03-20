@@ -45,5 +45,5 @@ object MyBundle : DynamicBundle(BUNDLE) {
 
     var currentProjectBasePath = ""
 
-    var downloadPath = "/Users/lukamitrovic/Desktop/Doktorske/zadatak"
+    var downloadFolder = "student-plugin-temp"
 }
