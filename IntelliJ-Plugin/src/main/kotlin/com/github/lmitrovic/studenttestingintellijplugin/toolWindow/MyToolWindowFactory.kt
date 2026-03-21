@@ -1,14 +1,8 @@
-package com.github.nikolajr93.studenttestingintellijplugin.toolWindow
+package com.github.lmitrovic.studenttestingintellijplugin.toolWindow
 
-import com.github.nikolajr93.studenttestingintellijplugin.MyBundle
-import com.github.nikolajr93.studenttestingintellijplugin.api.RafApiClient
-import com.github.nikolajr93.studenttestingintellijplugin.api.Student
-import com.github.nikolajr93.studenttestingintellijplugin.api.StudentInfoDto
-import com.github.nikolajr93.studenttestingintellijplugin.services.MyProjectService
-import com.google.gson.Gson
+import com.github.lmitrovic.studenttestingintellijplugin.MyBundle
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.WriteAction
-import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.editor.event.CaretEvent
 import com.intellij.openapi.editor.event.CaretListener
@@ -23,25 +17,18 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
-import com.intellij.ui.components.JBLabel
-import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.Label
 import com.intellij.ui.content.ContentFactory
 import raflms.studentstub.api.StudentStubService
 import raflms.studentstub.api.datamodel.TestWithAssignments
 import raflms.studentstub.config.ConfigFactory
-import tracking.EventTracker
 import java.awt.*
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Paths
-import java.time.LocalDate
-import java.util.*
 import javax.swing.*
-import javax.swing.Timer
 import javax.swing.border.EmptyBorder
 import kotlin.properties.Delegates
-
 
 class MyToolWindowFactory : ToolWindowFactory {
 
@@ -58,68 +45,26 @@ class MyToolWindowFactory : ToolWindowFactory {
     private lateinit var testGroupCB: JComboBox<Any>
     private lateinit var subjectCB: JComboBox<Any>
 
-    private lateinit var studentsIndexCombined: String
-    private lateinit var studentReturnedJSON: String
-    private lateinit var studentReturnedJSONLocal: String
-    private lateinit var localStudentObject: Student
-    private lateinit var localStudentDTObject: StudentInfoDto
-    private lateinit var remoteStudentObject1: Student
-    private lateinit var remoteStudentObject2: StudentInfoDto
-
-    private lateinit var gson: Gson
-
     private lateinit var mainPanel: JPanel
     private lateinit var initialPanel: JPanel
     private lateinit var formPanel: JPanel
     private lateinit var studentEnrollmentInfoPanel: JPanel
     private lateinit var studentsTestSpecificPanel: JPanel
-    private lateinit var comboBoxPanel: JPanel
     private lateinit var fieldsPanel: JPanel
     private lateinit var afterClonedPanel: JPanel
-    private lateinit var toolWindow: ToolWindow
     private lateinit var contentFactory: ContentFactory
 
-    private lateinit var studentIndex: String
     private var isSuccess by Delegates.notNull<Boolean>()
 
-    // Add event tracker
-    private lateinit var eventTracker: EventTracker
 
     init {
         thisLogger().warn("Don't forget to remove all non-needed sample code files with their corresponding registration entries in `plugin.xml`.")
-        gson = Gson()
         isSuccess = false
-
-        var firstDigitPos = MyBundle.username.indexOfFirst { it.isDigit() }
-        var lastDigitPos = MyBundle.username.indexOfLast { it.isDigit() }
-        MyBundle.builtStudentId =
-            MyBundle.username.substring(lastDigitPos + 1).uppercase(Locale.getDefault()) +
-            MyBundle.username.substring(firstDigitPos, lastDigitPos - 1) + LocalDate.now().year / 100 +
-            MyBundle.username.substring(lastDigitPos - 1, lastDigitPos + 1)
-
-        print(MyBundle.builtStudentId)
-//        Ne radi ako API nije podignut
-        var studentReturnedString = RafApiClient.getStudent(MyBundle.builtStudentId)
-        MyBundle.returnedStudentString = studentReturnedString
-        remoteStudentObject2 = gson.fromJson(studentReturnedString, StudentInfoDto::class.java)
-        MyBundle.returnedStudent2 = remoteStudentObject2
-        remoteStudentObject2 = MyBundle.returnedStudent2
-
-        if (MyBundle.currUsername.length > 3) {
-            MyBundle.username = MyBundle.currUsername
-        }
     }
 
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
-        eventTracker = EventTracker(project)
 
         val studentService = StudentStubService(ConfigFactory.createConfig())
-
-        val struggleTracker = eventTracker.struggleTracker
-        val errorTracker = eventTracker.errorTracker
-
-        struggleTracker?.trackCompilationPattern(isSuccess)
-        errorTracker?.trackError("Compilation failed", "SYNTAX_ERROR")
 
         /**
          * LOGOVANJE KLIKTANJA POCETAK
@@ -140,13 +85,6 @@ class MyToolWindowFactory : ToolWindowFactory {
                             val currentTime = System.currentTimeMillis()
 
                             if (currentLine != lastLine) {
-                                val timeSpent = currentTime - lastTime
-                                val data = hashMapOf<String, Any>(
-                                    "line" to lastLine,
-                                    "timeSpentMillis" to timeSpent
-                                )
-                                eventTracker.logEvent("LINE_VIEW_DURATION", MyBundle.builtStudentId, data)
-
                                 lastLine = currentLine
                                 lastTime = currentTime
                             }
@@ -158,12 +96,8 @@ class MyToolWindowFactory : ToolWindowFactory {
         /**
          * LOGOVANJE KLIKTANJA KRAJ
          */
-        val myToolWindow = MyToolWindow(toolWindow)
 
         this.contentFactory = ContentFactory.getInstance()
-
-        // Get instance of ProjectManagerEx for project handling
-        val projectManager = ProjectManager.getInstance()
 
         // Create a panel to hold all components
         mainPanel = JPanel(BorderLayout())
@@ -221,8 +155,6 @@ class MyToolWindowFactory : ToolWindowFactory {
 
         classroomNameTF = JTextField(20)
         classroomNameTF.preferredSize = Dimension(300, 24)
-
-        classroomNameTF.text = MyBundle.classroom
 
         val subjectLabelText = JLabel("Assignment:")
         subjectLabelText.minimumSize = Dimension(20, subjectLabelText.minimumSize.height)
@@ -300,7 +232,7 @@ class MyToolWindowFactory : ToolWindowFactory {
                 )
 
                 // `invokeLater` schedules this task to run on the Event Dispatch Thread (EDT).
-                ApplicationManager.getApplication().invokeLater {
+                ApplicationManager.getApplication().invokeLater (label@{
                     if (isSuccess) {
 
                         ApplicationManager.getApplication().invokeLater {
@@ -363,7 +295,6 @@ class MyToolWindowFactory : ToolWindowFactory {
                             if (isSuccess) {
                                 progressBar.isVisible = true
                                 signInButton.isEnabled = false
-                                MyBundle.repoCloned = true
                                 commitButton.isVisible = false
                                 signInButton.isVisible = false
                                 finalSubmissionButton.isVisible = true
@@ -373,135 +304,94 @@ class MyToolWindowFactory : ToolWindowFactory {
                                     val virtualFile =
                                         LocalFileSystem.getInstance().refreshAndFindFileByPath(project.basePath!!)
                                     virtualFile?.refresh(false, true)
-
-                                    // Log that student can now start coding
-                                    eventTracker.logEvent("CODING_PHASE_START", MyBundle.builtStudentId)
                                 })
                             }
                         }
                     } else {
                         cloningReportArea.text = "Failed to clone repository."
-                        // Log failed clone
-                        eventTracker.logEvent("REPOSITORY_CLONE_FAILED", MyBundle.builtStudentId)
                     }
-                }
+                })
             }
 
         }
 
-        var isPushSuccess = false;
 
         commitButton.preferredSize = Dimension(100, 30)
         commitButton.maximumSize = Dimension(100, 30)
+
         commitButton.addActionListener {
-            // Log submission attempt
-            eventTracker.logEvent("SUBMISSION_ATTEMPT", MyBundle.builtStudentId, HashMap<String, Any>().apply {
-                put("attemptTime", System.currentTimeMillis())
-            })
-
-            // Get the current project
             val currentProject = ProjectManager.getInstance().openProjects[0]
-
-            // Save all open files
             FileDocumentManager.getInstance().saveAllDocuments()
-
-            // Log that files were saved before submission
-            eventTracker.logEvent("FILES_SAVED_BEFORE_SUBMISSION", MyBundle.builtStudentId)
 
             // Start a background thread for the blocking operations
             ApplicationManager.getApplication().executeOnPooledThread {
                 // Use the project base path as the repository path. Replace "newBranch" with the desired branch name.
                 studentService.setProjectRoot(currentProject.basePath)
-                isPushSuccess = studentService.submitAssignment(false)
+                val isPushSuccess = studentService.submitAssignment(false)
 
                 // If the push operation is successful, close and dispose of the project
-
-                if(isPushSuccess)
-                    showSuccessPopup()
+                if(isPushSuccess){
+                    JOptionPane.showMessageDialog(
+                        null,
+                        "Uspešno ste predali rad!",
+                        "Uspešno",
+                        JOptionPane.INFORMATION_MESSAGE
+                    )
+                }
             }
         }
 
         finalSubmissionButton.addActionListener {
-            // Log submission attempt
-            eventTracker.logEvent("SUBMISSION_ATTEMPT", MyBundle.builtStudentId, HashMap<String, Any>().apply {
-                put("attemptTime", System.currentTimeMillis())
-            })
+            val confirmationDialog = JOptionPane.showConfirmDialog(
+                null,
+                "Da li ste sigurni da želite da predate rad?",
+                "Potvrda o predaji rada",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.QUESTION_MESSAGE
+            )
 
-            // Get the current project
-            val currentProject = ProjectManager.getInstance().openProjects[0]
+            if (confirmationDialog == JOptionPane.YES_OPTION) {
 
-            // Save all open files
-            FileDocumentManager.getInstance().saveAllDocuments()
+                val currentProject = ProjectManager.getInstance().openProjects[0]
+                FileDocumentManager.getInstance().saveAllDocuments()
 
-            // Log that files were saved before submission
-            eventTracker.logEvent("FILES_SAVED_BEFORE_SUBMISSION", MyBundle.builtStudentId)
+                // Start a background thread for the blocking operations
+                ApplicationManager.getApplication().executeOnPooledThread {
 
-            // Start a background thread for the blocking operations
-            ApplicationManager.getApplication().executeOnPooledThread {
+                    studentService.setProjectRoot(currentProject.basePath)
+                    val isPushSuccess = studentService.submitAssignment(true)
 
-                studentService.setProjectRoot(currentProject.basePath)
-                isPushSuccess = studentService.submitAssignment(true)
-
-                if (isPushSuccess) {
-                    finalSubmissionButton.isEnabled = false
-                    eventTracker.logEvent("SUBMISSION_PUSH_SUCCESS", MyBundle.builtStudentId)
-
-                    val confirmationDialog = JOptionPane.showConfirmDialog(
-                        null,
-                        "Da li ste sigurni da želite da predate rad?",
-                        "Potvrda o predaji rada",
-                        JOptionPane.YES_NO_OPTION,
-                        JOptionPane.QUESTION_MESSAGE
-                    )
-
-                    if (confirmationDialog == JOptionPane.YES_OPTION) {
-                        // Log final submission confirmation
-                        eventTracker.logEvent(
-                            "SUBMISSION_CONFIRMED",
-                            MyBundle.builtStudentId,
-                            HashMap<String, Any>().apply {
-                                put("finalSubmissionTime", System.currentTimeMillis())
-                            })
-
-                        // Stop tracking before closing
-                        eventTracker.stopTracking(MyBundle.builtStudentId)
+                    if (isPushSuccess) {
+                        finalSubmissionButton.isEnabled = false
+                        //showSuccessPopup()
+                        JOptionPane.showMessageDialog(
+                            null,
+                            "Uspešno ste predali rad!",
+                            "Uspešno",
+                            JOptionPane.INFORMATION_MESSAGE
+                        )
                     } else {
-                        // Log submission cancelled
-                        eventTracker.logEvent("SUBMISSION_CANCELLED", MyBundle.builtStudentId)
-                    }
-                } else {
-                    // Log failed push
-                    eventTracker.logEvent("SUBMISSION_PUSH_FAILED", MyBundle.builtStudentId)
-
-                    println("Failed to push changes to new branch.")
-
-                    //  Dodato samo radi demonstracije
-                    val confirmationDialog = JOptionPane.showConfirmDialog(
-                        null,
-                        "Da li ste sigurni da želite da predate rad?",
-                        "Potvrda o predaji rada",
-                        JOptionPane.YES_NO_OPTION,
-                        JOptionPane.QUESTION_MESSAGE
-                    )
-                    if (confirmationDialog == JOptionPane.YES_OPTION) {
-                        eventTracker.logEvent("SUBMISSION_CONFIRMED_DESPITE_FAILURE", MyBundle.builtStudentId)
-                        eventTracker.stopTracking(MyBundle.builtStudentId)
+                        println("Failed to push changes to new branch.")
+                        //  Dodato samo radi demonstracije
+                        JOptionPane.showMessageDialog(
+                            null,
+                            "Greška tokom predaje rada!",
+                            "Greška",
+                            JOptionPane.INFORMATION_MESSAGE
+                        )
                     }
                 }
             }
+
         }
 
         commitButton.preferredSize = Dimension(100, 30)
         commitButton.maximumSize = Dimension(100, 30)
 
-
         fieldsPanel.add(signInButton)
         commitButton.isVisible = false
         finalSubmissionButton.isVisible = false
-        if (MyBundle.repoCloned) {
-            finalSubmissionButton.isVisible = true
-            commitButton.isVisible = true
-        }
+
         fieldsPanel.add(commitButton)
         fieldsPanel.add(Box.createRigidArea(Dimension(0, 5))) // Vertikalni razmak od 10 piksela
         fieldsPanel.add(finalSubmissionButton)
@@ -522,7 +412,6 @@ class MyToolWindowFactory : ToolWindowFactory {
 
 
     private fun makeField(name: String, field: JTextField): JPanel {
-
         val labelText = JLabel(name)
         labelText.minimumSize = Dimension(20, labelText.minimumSize.height)
         labelText.preferredSize = Dimension(80, labelText.preferredSize.height)
@@ -544,7 +433,6 @@ class MyToolWindowFactory : ToolWindowFactory {
     }
 
     private fun makeSmallField(name: String, field: JTextField): JPanel {
-
         val labelText = JLabel(name)
         labelText.minimumSize = Dimension(20, labelText.minimumSize.height)
         labelText.preferredSize = Dimension(60, labelText.preferredSize.height)
@@ -565,107 +453,5 @@ class MyToolWindowFactory : ToolWindowFactory {
         return fieldPanel
     }
 
-
-
-    private fun showSuccessPopup() {
-        val frame = JFrame().apply {
-            title = "Uspešno"
-            isUndecorated = true
-            preferredSize = Dimension(300, 60) // Manje dimenzije
-            defaultCloseOperation = JFrame.DISPOSE_ON_CLOSE
-            background = Color(0, 0, 0, 0)
-        }
-
-        // Panel sa svetlo zelenom bojom (#DBF7EE)
-        val panel = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            background = Color(219, 247, 238) // #DBF7EE u RGB
-            border = BorderFactory.createEmptyBorder(15, 20, 15, 20) // Manji padding
-
-            val label = JLabel("Uspešno sačuvan rad", SwingConstants.CENTER).apply {
-                foreground = Color(0, 0, 0) // Crni tekst
-                font = font.deriveFont(Font.BOLD, 13f) // Manja font veličina
-                alignmentX = Component.CENTER_ALIGNMENT
-            }
-
-            add(label)
-        }
-
-        frame.contentPane = panel
-        frame.pack()
-
-        // Centriranje sa pomeranjem na gore
-        val dim = Toolkit.getDefaultToolkit().screenSize
-        frame.setLocation(dim.width/2 - frame.size.width/2, dim.height/4 - frame.size.height/2)
-
-        // Postavljamo prozor da bude polu-transparentan na početku
-        frame.opacity = 0f
-        frame.isVisible = true
-
-        // Animacija pojavljivanja
-        Timer(20, null).apply {
-            var counter = 0f
-            addActionListener {
-                if (counter < 1f) {
-                    counter += 0.05f
-                    frame.opacity = counter
-                } else {
-                    stop()
-                }
-            }
-            start()
-        }
-
-        // Automatsko zatvaranje sa fade-out animacijom nakon 2 sekunde
-        Timer(2000) { _ ->
-            Timer(20, null).apply {
-                var counter = 1f
-                addActionListener {
-                    if (counter > 0f) {
-                        counter -= 0.05f
-                        frame.opacity = counter
-                    } else {
-                        frame.dispose()
-                        stop()
-                    }
-                }
-                start()
-            }
-        }.apply {
-            isRepeats = false
-            start()
-        }
-    }
-
-    private fun getClassroom(input: String): String {
-        if (input.length != 5) return ""
-
-        val prefix = input[0].lowercaseChar()
-        val digit = input[2]  // jer je format: G0x00 → interesuje nas 'x' na indeksu 2
-
-        return when (prefix) {
-            'g' -> "RG $digit"
-            'u' -> "RAF $digit"
-            else -> ""
-        }
-    }
-
-
     override fun shouldBeAvailable(project: Project) = true
-
-    class MyToolWindow(toolWindow: ToolWindow) {
-
-        private val service = toolWindow.project.service<MyProjectService>()
-
-        fun getContent() = JBPanel<JBPanel<*>>().apply {
-            val label = JBLabel(MyBundle.message("randomLabel", "?"))
-
-            add(label)
-            add(JButton(MyBundle.message("shuffle")).apply {
-                addActionListener {
-                    label.text = MyBundle.message("randomLabel", service.getRandomNumber())
-                }
-            })
-        }
-    }
 }

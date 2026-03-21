@@ -1,4 +1,4 @@
-package com.github.nikolajr93.studenttestingintellijplugin.listeners
+package com.github.lmitrovic.studenttestingintellijplugin.listeners
 
 import com.intellij.openapi.application.ApplicationActivationListener
 import com.intellij.openapi.diagnostic.thisLogger

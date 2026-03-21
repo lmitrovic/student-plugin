@@ -1,9 +1,9 @@
-package com.github.nikolajr93.studenttestingintellijplugin.services
+package com.github.lmitrovic.studenttestingintellijplugin.services
 
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
-import com.github.nikolajr93.studenttestingintellijplugin.MyBundle
+import com.github.lmitrovic.studenttestingintellijplugin.MyBundle
 
 @Service(Service.Level.PROJECT)
 class MyProjectService(project: Project) {
