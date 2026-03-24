@@ -41,7 +41,8 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           # Prilagođena putanja zbog podfoldera
           source: "IntelliJ-Plugin/build/distributions/*.zip"
-          target: ${{ env.REMOTE_TARGET }}
+          target: "/var/www/intellij-plugins/"
+          strip_components: 0
 
       # 5. Ažuriranje updatePlugins.xml uz čuvanje istorije
       - name: Update updatePlugins.xml
