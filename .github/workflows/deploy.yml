@@ -29,6 +29,7 @@ jobs:
 
       # 3. Build (sada će Gradle videti novu verziju u gradle.properties)
       - name: Build plugin
+        working-directory: IntelliJ-Plugin  # DODAJ OVO
         run: ./gradlew buildPlugin
 
       # 4. Slanje ZIP fajla na server
@@ -38,7 +39,8 @@ jobs:
           host: ${{ env.PRODUCTION_SERVER_HOST }}
           username: ${{ env.PRODUCTION_SERVER_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "build/distributions/*.zip"
+          # Prilagođena putanja zbog podfoldera
+          source: "IntelliJ-Plugin/build/distributions/*.zip"
           target: ${{ env.REMOTE_TARGET }}
 
       # 5. Ažuriranje updatePlugins.xml uz čuvanje istorije
