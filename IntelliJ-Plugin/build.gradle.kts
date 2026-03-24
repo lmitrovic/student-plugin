@@ -20,8 +20,8 @@ version = properties("pluginVersion").get()
 
 // Configure project's dependencies
 repositories {
-    mavenLocal()
     mavenCentral()
+    maven { url = uri("https://jitpack.io") }
 }
 
 // Dependencies are managed with Gradle version catalog - read more: https://docs.gradle.org/current/userguide/platforms.html#sub:version-catalog
@@ -31,6 +31,9 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("raf.rs:studentstub:1.0-SNAPSHOT")
     testImplementation("org.mockito.kotlin:mockito-kotlin:3.2.0")
+
+    // Jit za stub dependecy
+    implementation("com.github.lmitrovic:studentstub:1.0.0")
 }
 
 
