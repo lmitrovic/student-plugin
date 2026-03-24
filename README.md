@@ -1,4 +1,4 @@
-# RAF-LMS
+# RAF-LMS 
 RAF sistem za upravljanje učenjem, tj. RAF LMS, u svom osnovnom obliku, predstavlja platformu za kreiranje, izradu, pregledanje i ocenjivanje kolokvijuma i ispita iz predmeta koji se bave programiranjem.
 
 Sistem ima serversku i klijentsku stranu. Serverska strana služi za skladištenje postavki, kao i urađenih zadataka koji dolaze na kolokvijumima ili ispitima, dok klijentska strana podržava integraciju sa Intellij razvojnim okruženjem.
