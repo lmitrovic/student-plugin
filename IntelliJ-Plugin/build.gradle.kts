@@ -29,7 +29,6 @@ dependencies {
     api("org.junit.jupiter:junit-jupiter-api:5.10.0")
     implementation("org.junit.jupiter:junit-jupiter-api:5.10.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("raf.rs:studentstub:1.0-SNAPSHOT")
     testImplementation("org.mockito.kotlin:mockito-kotlin:3.2.0")
 
     // Jit za stub dependecy
