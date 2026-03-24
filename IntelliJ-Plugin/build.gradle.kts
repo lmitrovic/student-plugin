@@ -29,26 +29,7 @@ dependencies {
     api("org.junit.jupiter:junit-jupiter-api:5.10.0")
     implementation("org.junit.jupiter:junit-jupiter-api:5.10.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("org.springframework:spring-web:5.3.16")
-
-    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.15.2")
-    implementation("com.fasterxml.jackson.core:jackson-databind:2.15.2")
-
     implementation("raf.rs:studentstub:1.0-SNAPSHOT")
-
-    //implementation("com.jcraft:jsch:0.1.55")
-    //    implementation(libs.annotations)
-    //implementation("org.eclipse.jgit:org.eclipse.jgit:6.8.0.202311291450-r")
-//    implementation("org.eclipse.jgit:org.eclipse.jgit:5.5.+")
-    implementation("org.eclipse.jgit:org.eclipse.jgit:5.5.+"){
-        exclude(group = "org.slf4j")
-    }
-//    Old version
-//    implementation("org.apache.httpcomponents.client5:httpclient5-fluent:5.1.3")
-//    implementation("org.apache.httpcomponents.client5:httpclient5-fluent:5.1.3") {
-//        exclude(group = "org.slf4j")
-//    }
-//    implementation("org.eclipse.jgit:org.eclipse.jgit:5.6.0.201912101111-r")
     testImplementation("org.mockito.kotlin:mockito-kotlin:3.2.0")
 }
 
