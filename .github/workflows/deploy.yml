@@ -41,68 +41,58 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           # Prilagođena putanja zbog podfoldera
           source: "IntelliJ-Plugin/build/distributions/*.zip"
-          target: "/var/www/intellij-plugins/"
-          strip_components: 0
+          target: "/var/www/intellij-plugins/build/distributions/"
+          strip_components: 3
+          overwrite: true
 
       # 5. Ažuriranje updatePlugins.xml uz čuvanje istorije
-      - name: Update updatePlugins.xml
+      - name: Update updatePluginsStudent.xml
         uses: appleboy/ssh-action@v0.1.7
         with:
           host: ${{ secrets.PRODUCTION_SERVER_HOST }}
           username: ${{ secrets.PRODUCTION_SERVER_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # Putanje
             BASE_DIR="/var/www/intellij-plugins"
             DIST_DIR="$BASE_DIR/build/distributions"
-            XML_PATH="$BASE_DIR/updatePlugins.xml"
-            
-            # Pronalaženje najnovijeg ZIP-a (logičko sortiranje po verziji -v)
-            LATEST_ZIP=$(ls -v $DIST_DIR/nastavnicki-plugin-*.zip 2>/dev/null | tail -n 1)
-            
+            # PAŽNJA: Promenjena putanja na tvoj XML za studente
+            XML_PATH="$BASE_DIR/updatePluginsStudent.xml"
+          
+          # Tražimo najnoviji STUDENT-TESTING zip
+            LATEST_ZIP=$(ls -v $DIST_DIR/Student-testing-IntelliJ-plugin-*.zip 2>/dev/null | tail -n 1)
+          
             if [ -z "$LATEST_ZIP" ]; then
-              echo "GRESKA: Nije pronađen nijedan nastavnicki-plugin ZIP u $DIST_DIR"
+              echo "GRESKA: Nije pronađen nijedan studentski ZIP u $DIST_DIR"
               exit 1
-            fi
-            
+           fi
+          
             FILENAME=$(basename "$LATEST_ZIP")
-            VERSION=$(echo "$FILENAME" | sed -E 's/nastavnicki-plugin-(.*)\.zip/\1/')
+            # Izvlačenje verzije iz imena (Student-testing-IntelliJ-plugin-0.0.7.zip -> 0.0.7)
+            VERSION=$(echo "$FILENAME" | sed -E 's/Student-testing-IntelliJ-plugin-(.*)\.zip/\1/')
             PLUGIN_URL="http://157.180.37.247/build/distributions/$FILENAME"
-            
-            echo "Detektovan najnoviji fajl: $FILENAME"
-            echo "Verzija za upis: $VERSION"
-
-            # Provera da li verzija već postoji u XML-u (da ne dupliramo)
+          
+            echo "Ažuriram XML za verziju: $VERSION"
+          
             if [ -f "$XML_PATH" ] && grep -q "version=\"$VERSION\"" "$XML_PATH"; then
-              echo "Verzija $VERSION je već u XML-u. Završavam."
+              echo "Verzija $VERSION je već u XML-u."
               exit 0
             fi
-
-            # Ako XML ne postoji, napravi ga
-            if [ ! -f "$XML_PATH" ]; then
-               echo '<?xml version="1.0" encoding="UTF-8"?><plugins></plugins>' > "$XML_PATH"
-            fi
-
-            # Dodavanje novog <plugin> taga na kraj pomoću xmlstarlet
-            TEMP_XML="/tmp/updatePlugins_temp.xml"
-            
-            xmlstarlet ed \
+          
+          # Dodavanje novog taga sa ispravnim ID-jem (com.raf.studentski)
+            xmlstarlet ed -L \
               --subnode "/plugins" --type elem -n "plugin" -v "" \
               --var "L" "/plugins/plugin[last()]" \
-              --insert "\$L" --type attr -n "id" -v "com.raf.nastavnicki" \
+              --insert "\$L" --type attr -n "id" -v "com.raf.studentski" \
               --insert "\$L" --type attr -n "url" -v "$PLUGIN_URL" \
               --insert "\$L" --type attr -n "version" -v "$VERSION" \
-              --subnode "\$L" --type elem -n "name" -v "Nastavnički Plugin - RAF" \
-              --subnode "\$L" --type elem -n "description" -v "Plugin za nastavnike u IntelliJ-u" \
+              --subnode "\$L" --type elem -n "name" -v "Studentski Plugin - RAF" \
+              --subnode "\$L" --type elem -n "description" -v "Plugin za studente u IntelliJ-u" \
               --subnode "\$L" --type elem -n "idea-version" \
-              --insert "\$L/idea-version" --type attr -n "since-build" -v "233" \
+              --insert "\$L/idea-version" --type attr -n "since-build" -v "241.0" \
               --insert "\$L/idea-version" --type attr -n "until-build" -v "999.*" \
               --subnode "\$L" --type elem -n "vendor" \
               --insert "\$L/vendor" --type attr -n "email" -v "zarkoned@outlook.com" \
               --insert "\$L/vendor" --type attr -n "url" -v "https://raf.edu.rs" \
               --subnode "\$L" --type elem -n "icon" \
               --insert "\$L/icon" --type attr -n "url" -v "http://157.180.37.247/pluginIcon.svg" \
-              "$XML_PATH" > "$TEMP_XML"
-            
-            mv "$TEMP_XML" "$XML_PATH"
-            echo "XML uspešno ažuriran verzijom $VERSION."
+              "$XML_PATH"
