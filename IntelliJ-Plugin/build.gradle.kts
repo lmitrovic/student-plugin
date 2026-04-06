@@ -32,7 +32,7 @@ dependencies {
     testImplementation("org.mockito.kotlin:mockito-kotlin:3.2.0")
 
     // Jit za stub dependecy
-    implementation("com.github.lmitrovic:studentstub:main-SNAPSHOT")
+    implementation("com.github.RAFSoftLab.raflms-modular:studentstub:master-SNAPSHOT")
 }
 
 
