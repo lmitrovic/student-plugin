@@ -243,9 +243,9 @@ class MyToolWindowFactory : ToolWindowFactory {
                             val base = File(System.getProperty("user.home"), MyBundle.downloadFolder)
 
                             val first = base.listFiles { obj: File? -> obj!!.isDirectory() }[0]
-                            val second = first.listFiles { obj: File? -> obj!!.isDirectory() }[0]
+                            //val second = first.listFiles { obj: File? -> obj!!.isDirectory() }[0]
 
-                            val assignmentSource = File(second.absolutePath)
+                            val assignmentSource = File(first.absolutePath)
 
                             FileDocumentManager.getInstance().saveAllDocuments()
                             VirtualFileManager.getInstance().syncRefresh()
