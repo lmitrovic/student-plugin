@@ -24,22 +24,21 @@ jobs:
           ref: ${{ github.event.workflow_run.head_branch }}
           fetch-depth: 0
 
-      # 2. Podešavanje Jave (Preporučeno za stabilan build)
+      # 2. Podešavanje Jave (JDK 17 je standard za novije IntelliJ verzije)
       - name: Set up JDK 17
         uses: actions/setup-java@v3
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      # 3. Build (Gradle se pokreće unutar IntelliJ-Plugin foldera)
+      # 3. Build (DODATO 'clean' da bi se forsirala nova verzija iz gradle.properties)
       - name: Build plugin
         working-directory: IntelliJ-Plugin
         run: |
           chmod +x gradlew
-          ./gradlew buildPlugin --no-configuration-cache
+          ./gradlew clean buildPlugin --no-configuration-cache
 
-      # 4. Slanje ZIP fajla na server
-      # strip_components: 3 uklanja "IntelliJ-Plugin/build/distributions/" iz putanje
+      # 4. Slanje ZIP fajla na server (overwrite osigurava zamenu ako je isto ime)
       - name: Copy build to server
         uses: appleboy/scp-action@v0.1.5
         with:
@@ -51,20 +50,20 @@ jobs:
           strip_components: 3
           overwrite: true
 
-      # 5. Ažuriranje updatePluginsStudent.xml na serveru
+      # 5. Ažuriranje updatePluginsStudent.xml i čišćenje starih verzija
       - name: Update updatePluginsStudent.xml
         uses: appleboy/ssh-action@v0.1.7
         with:
-          host: ${{ secrets.PRODUCTION_SERVER_HOST }}
-          username: ${{ secrets.PRODUCTION_SERVER_USERNAME }}
+          host: ${{ env.PRODUCTION_SERVER_HOST }}
+          username: ${{ env.PRODUCTION_SERVER_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             BASE_DIR="/var/www/intellij-plugins"
             DIST_DIR="$BASE_DIR/build/distributions"
             XML_PATH="$BASE_DIR/updatePluginsStudent.xml"
             
-            # Pronalaženje najnovijeg studentskog ZIP-a
-            LATEST_ZIP=$(ls -v $DIST_DIR/Student-testing-IntelliJ-plugin-*.zip 2>/dev/null | tail -n 1)
+            # Pronalaženje najnovijeg ZIP-a po vremenu modifikacije (ls -t)
+            LATEST_ZIP=$(ls -t $DIST_DIR/Student-testing-IntelliJ-plugin-*.zip 2>/dev/null | head -n 1)
             
             if [ -z "$LATEST_ZIP" ]; then
               echo "GRESKA: Nije pronađen nijedan studentski ZIP u $DIST_DIR"
@@ -72,15 +71,19 @@ jobs:
             fi
             
             FILENAME=$(basename "$LATEST_ZIP")
-            # Izvlačenje verzije (npr. 0.0.8)
+            # Izvlačenje verzije iz imena fajla
             VERSION=$(echo "$FILENAME" | sed -E 's/Student-testing-IntelliJ-plugin-(.*)\.zip/\1/')
             PLUGIN_URL="http://157.180.37.247/build/distributions/$FILENAME"
             
-            echo "Detektovana verzija: $VERSION"
+            echo "Detektovana nova verzija: $VERSION"
 
-            # Provera da li verzija već postoji
+            # BRISANJE SVIH STARIH VERZIJA (Ostaje samo najnovija)
+            find $DIST_DIR -name "Student-testing-IntelliJ-plugin-*.zip" ! -name "$FILENAME" -delete
+            echo "Stare verzije obrisane. Zadržana samo: $FILENAME"
+
+            # Provera da li je verzija već u XML-u (da se ne duplira)
             if [ -f "$XML_PATH" ] && grep -q "version=\"$VERSION\"" "$XML_PATH"; then
-              echo "Verzija $VERSION je već u XML-u. Preskačem ažuriranje."
+              echo "Verzija $VERSION je već prisutna u XML-u. Završavam."
               exit 0
             fi
 
@@ -89,7 +92,7 @@ jobs:
                echo '<?xml version="1.0" encoding="UTF-8"?><plugins></plugins>' > "$XML_PATH"
             fi
 
-            # Upisivanje novog taga pomoću xmlstarlet (In-place edit)
+            # Upisivanje novog taga pomoću xmlstarlet
             xmlstarlet ed -L \
               --subnode "/plugins" --type elem -n "plugin" -v "" \
               --var "L" "/plugins/plugin[last()]" \
@@ -108,4 +111,4 @@ jobs:
               --insert "\$L/icon" --type attr -n "url" -v "http://157.180.37.247/pluginIcon.svg" \
               "$XML_PATH"
             
-            echo "XML uspešno ažuriran verzijom $VERSION."
+            echo "XML uspešno ažuriran na verziju $VERSION."
