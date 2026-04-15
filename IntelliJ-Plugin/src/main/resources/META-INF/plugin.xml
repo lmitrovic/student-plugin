@@ -12,7 +12,13 @@
     <resource-bundle>messages.MyBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.lmitrovic.studenttestingintellijplugin.toolWindow.MyToolWindowFactory" id="MyToolWindow" secondary="false"/>
+        <toolWindow factoryClass="com.github.lmitrovic.studenttestingintellijplugin.toolWindow.MyToolWindowFactory" id="Studentski plugin" icon="/icons/pluginIcon.svg"/>
+
+        <notificationGroup id="RAF LMS Updates"
+                           displayType="BALLOON"
+                           isLogByDefault="true"/>
+
+        <postStartupActivity implementation="com.github.lmitrovic.studenttestingintellijplugin.toolWindow.PluginStartupActivity"/>
     </extensions>
 
     <applicationListeners>
