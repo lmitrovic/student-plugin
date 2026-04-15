@@ -8,37 +8,35 @@ on:
 
 jobs:
   deploy:
-    # Pokreće se samo ako je Bump workflow uspešno završen
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
 
     env:
       PRODUCTION_SERVER_USERNAME: ${{ secrets.PRODUCTION_SERVER_USERNAME }}
       PRODUCTION_SERVER_HOST: ${{ secrets.PRODUCTION_SERVER_HOST }}
-      REMOTE_TARGET: "/var/www/intellij-plugins/"
 
     steps:
-      # 1. Povlačenje najnovijeg koda (sa Bump commit-om)
+      # 1. FORSIRAMO PROD GRANU
       - uses: actions/checkout@v3
         with:
-          ref: ${{ github.event.workflow_run.head_branch }}
+          ref: 'prod'
           fetch-depth: 0
 
-      # 2. Podešavanje Jave (JDK 17 je standard za novije IntelliJ verzije)
+      # 2. Podešavanje Jave
       - name: Set up JDK 17
         uses: actions/setup-java@v3
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      # 3. Build (DODATO 'clean' da bi se forsirala nova verzija iz gradle.properties)
+      # 3. Build (uz clean)
       - name: Build plugin
         working-directory: IntelliJ-Plugin
         run: |
           chmod +x gradlew
           ./gradlew clean buildPlugin --no-configuration-cache
 
-      # 4. Slanje ZIP fajla na server (overwrite osigurava zamenu ako je isto ime)
+      # 4. Slanje ZIP fajla na server
       - name: Copy build to server
         uses: appleboy/scp-action@v0.1.5
         with:
@@ -50,7 +48,7 @@ jobs:
           strip_components: 3
           overwrite: true
 
-      # 5. Ažuriranje updatePluginsStudent.xml i čišćenje starih verzija
+      # 5. Ažuriranje XML-a bez brisanja starih fajlova
       - name: Update updatePluginsStudent.xml
         uses: appleboy/ssh-action@v0.1.7
         with:
@@ -62,37 +60,31 @@ jobs:
             DIST_DIR="$BASE_DIR/build/distributions"
             XML_PATH="$BASE_DIR/updatePluginsStudent.xml"
             
-            # Pronalaženje najnovijeg ZIP-a po vremenu modifikacije (ls -t)
+            # Tražimo najnoviji fajl po vremenu modifikacije
             LATEST_ZIP=$(ls -t $DIST_DIR/Student-testing-IntelliJ-plugin-*.zip 2>/dev/null | head -n 1)
             
             if [ -z "$LATEST_ZIP" ]; then
-              echo "GRESKA: Nije pronađen nijedan studentski ZIP u $DIST_DIR"
+              echo "GRESKA: Nije pronađen nijedan ZIP."
               exit 1
             fi
             
             FILENAME=$(basename "$LATEST_ZIP")
-            # Izvlačenje verzije iz imena fajla
             VERSION=$(echo "$FILENAME" | sed -E 's/Student-testing-IntelliJ-plugin-(.*)\.zip/\1/')
             PLUGIN_URL="http://157.180.37.247/build/distributions/$FILENAME"
             
-            echo "Detektovana nova verzija: $VERSION"
+            echo "Detektovana verzija na serveru: $VERSION"
 
-            # BRISANJE SVIH STARIH VERZIJA (Ostaje samo najnovija)
-            find $DIST_DIR -name "Student-testing-IntelliJ-plugin-*.zip" ! -name "$FILENAME" -delete
-            echo "Stare verzije obrisane. Zadržana samo: $FILENAME"
-
-            # Provera da li je verzija već u XML-u (da se ne duplira)
+            # Provera duplikata u XML-u
             if [ -f "$XML_PATH" ] && grep -q "version=\"$VERSION\"" "$XML_PATH"; then
-              echo "Verzija $VERSION je već prisutna u XML-u. Završavam."
+              echo "Verzija $VERSION već postoji u XML-u. Preskačem."
               exit 0
             fi
 
-            # Inicijalizacija XML-a ako ne postoji
+            # Inicijalizacija i xmlstarlet (isti kod kao pre)
             if [ ! -f "$XML_PATH" ]; then
                echo '<?xml version="1.0" encoding="UTF-8"?><plugins></plugins>' > "$XML_PATH"
             fi
 
-            # Upisivanje novog taga pomoću xmlstarlet
             xmlstarlet ed -L \
               --subnode "/plugins" --type elem -n "plugin" -v "" \
               --var "L" "/plugins/plugin[last()]" \
