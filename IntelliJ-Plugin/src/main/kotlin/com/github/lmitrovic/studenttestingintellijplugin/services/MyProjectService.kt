@@ -9,6 +9,7 @@ import com.github.lmitrovic.studenttestingintellijplugin.MyBundle
 class MyProjectService(project: Project) {
 
     init {
+        // Force pull req
         thisLogger().info(MyBundle.message("projectService", project.name))
         thisLogger().warn("Don't forget to remove all non-needed sample code files with their corresponding registration entries in `plugin.xml`.")
     }
