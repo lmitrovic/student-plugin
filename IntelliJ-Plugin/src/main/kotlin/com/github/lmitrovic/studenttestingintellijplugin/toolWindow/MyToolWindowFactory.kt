@@ -29,6 +29,8 @@ import java.nio.file.Paths
 import javax.swing.*
 import javax.swing.border.EmptyBorder
 import kotlin.properties.Delegates
+import raflms.trackingstub.api.TrackingStubService
+import raflms.trackingstub.config.ConfigFactory as TrackingConfigFactory
 
 class MyToolWindowFactory : ToolWindowFactory {
 
@@ -53,8 +55,10 @@ class MyToolWindowFactory : ToolWindowFactory {
     private lateinit var fieldsPanel: JPanel
     private lateinit var afterClonedPanel: JPanel
     private lateinit var contentFactory: ContentFactory
+    private lateinit var trackingService: TrackingStubService
 
     private var isSuccess by Delegates.notNull<Boolean>()
+    private var currentStudentId: String = ""
 
 
     init {
@@ -65,6 +69,7 @@ class MyToolWindowFactory : ToolWindowFactory {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
 
         val studentService = StudentStubService(ConfigFactory.createConfig())
+        trackingService = TrackingStubService(TrackingConfigFactory.createConfig())
 
         /**
          * LOGOVANJE KLIKTANJA POCETAK
@@ -234,6 +239,9 @@ class MyToolWindowFactory : ToolWindowFactory {
                 // `invokeLater` schedules this task to run on the Event Dispatch Thread (EDT).
                 ApplicationManager.getApplication().invokeLater (label@{
                     if (isSuccess) {
+                        val studentId = "${studentsStudyProgramTF.text}-${studentsIndexNumberTF.text}-${studentsStartYearTF.text}"
+                        val taskId = "${subjectCB.selectedItem}-${testGroupCB.selectedItem}-${studentsTermCB.selectedItem}"
+                        trackingService.startTracking(studentId, taskId)
 
                         ApplicationManager.getApplication().invokeLater {
 
@@ -362,6 +370,7 @@ class MyToolWindowFactory : ToolWindowFactory {
                     val isPushSuccess = studentService.submitAssignment(true)
 
                     if (isPushSuccess) {
+                        trackingService.stopTracking(studentId)
                         finalSubmissionButton.isEnabled = false
                         //showSuccessPopup()
                         JOptionPane.showMessageDialog(

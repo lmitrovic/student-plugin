@@ -33,6 +33,7 @@ dependencies {
 
     // Jit za stub dependecy
     implementation("com.github.RAFSoftLab.raflms-modular:studentstub:master-SNAPSHOT")
+    implementation("com.github.RAFSoftLab.raflms-modular:trackingstub:master-SNAPSHOT")
 }
 
 
