@@ -17,7 +17,6 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
-import com.intellij.ui.components.Label
 import com.intellij.ui.content.ContentFactory
 import raflms.studentstub.api.StudentStubService
 import raflms.studentstub.api.datamodel.TestWithAssignments
@@ -173,23 +172,17 @@ class MyToolWindowFactory : ToolWindowFactory {
         subjectCB = JComboBox(subjectChoices)
         subjectCB.isEnabled = true
 
-        subjectCB.addActionListener {
-            val selectedTestName = subjectCB.selectedItem as? String ?: return@addActionListener
+        fun updateGroupsAndTerms() {
+            val selectedTestName = subjectCB.selectedItem as? String ?: return
             val selectedTest = allTestsWithAssigmentsData
-                .find { it.testName == selectedTestName } ?: return@addActionListener
-
-            val assignments = selectedTest.assigments ?: return@addActionListener
-            val groups = assignments.mapNotNull { it.group }
-                .distinct()
-                .toTypedArray()
-
-            val terms = assignments.mapNotNull { it.term }
-                .distinct()
-                .toTypedArray()
-
-            testGroupCB.model = DefaultComboBoxModel(groups)
-            studentsTermCB.model = DefaultComboBoxModel(terms)
+                .find { it.testName == selectedTestName } ?: return
+            val assignments = selectedTest.assigments ?: return
+            testGroupCB.model = DefaultComboBoxModel(assignments.mapNotNull { it.group }.distinct().toTypedArray())
+            studentsTermCB.model = DefaultComboBoxModel(assignments.mapNotNull { it.term }.distinct().toTypedArray())
         }
+
+        subjectCB.addActionListener { updateGroupsAndTerms() }
+        updateGroupsAndTerms()
 
         studentsTestSpecificPanel.add(subjectLabelText)
         studentsTestSpecificPanel.add(subjectCB)
@@ -241,7 +234,7 @@ class MyToolWindowFactory : ToolWindowFactory {
                     if (isSuccess) {
                         val studentId = "${studentsStudyProgramTF.text}-${studentsIndexNumberTF.text}-${studentsStartYearTF.text}"
                         val taskId = "${subjectCB.selectedItem}-${testGroupCB.selectedItem}-${studentsTermCB.selectedItem}"
-                        trackingService.startTracking(studentId, taskId)
+                        //trackingService.startTracking(studentId, taskId)
 
                         ApplicationManager.getApplication().invokeLater {
 
@@ -370,7 +363,7 @@ class MyToolWindowFactory : ToolWindowFactory {
                     val isPushSuccess = studentService.submitAssignment(true)
 
                     if (isPushSuccess) {
-                        trackingService.stopTracking(studentId)
+                        //trackingService.stopTracking(studentId)
                         finalSubmissionButton.isEnabled = false
                         //showSuccessPopup()
                         JOptionPane.showMessageDialog(
@@ -407,7 +400,7 @@ class MyToolWindowFactory : ToolWindowFactory {
 
         val checkProjectButton = JButton("Check Project")
 
-        initialPanel.add(Label(System.getProperty("user.name")))
+        initialPanel.add(JLabel(System.getProperty("user.name")))
         initialPanel.add(checkProjectButton)
 
         mainPanel.add(fieldsPanel, BorderLayout.NORTH)
