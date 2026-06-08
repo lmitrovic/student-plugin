@@ -223,10 +223,12 @@ class MyToolWindowFactory : ToolWindowFactory {
                     studentsStartYearTF.text,
                     studentsStudyProgramTF.text,
                     studentsTaskGroupTF.text,
+                    studentsFirstNameTF.text,
+                    studentsLastNameTF.text,
                     subjectCB.selectedItem?.toString(),
                     testGroupCB.selectedItem?.toString(),
                     studentsTermCB.selectedItem?.toString(),
-                    Paths.get(System.getProperty("user.home"), MyBundle.downloadFolder).toString()
+                    Paths.get(System.getProperty("user.home"),MyBundle.downloadFolder).toString()
                 )
 
                 // `invokeLater` schedules this task to run on the Event Dispatch Thread (EDT).
