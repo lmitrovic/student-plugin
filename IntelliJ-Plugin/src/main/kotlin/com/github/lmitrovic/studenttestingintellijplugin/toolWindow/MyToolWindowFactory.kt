@@ -17,7 +17,6 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
-import com.intellij.ui.components.Label
 import com.intellij.ui.content.ContentFactory
 import raflms.studentstub.api.StudentStubService
 import raflms.studentstub.api.datamodel.TestWithAssignments
@@ -29,6 +28,8 @@ import java.nio.file.Paths
 import javax.swing.*
 import javax.swing.border.EmptyBorder
 import kotlin.properties.Delegates
+import raflms.trackingstub.api.TrackingStubService
+import raflms.trackingstub.config.ConfigFactory as TrackingConfigFactory
 
 class MyToolWindowFactory : ToolWindowFactory {
 
@@ -53,8 +54,10 @@ class MyToolWindowFactory : ToolWindowFactory {
     private lateinit var fieldsPanel: JPanel
     private lateinit var afterClonedPanel: JPanel
     private lateinit var contentFactory: ContentFactory
+    private lateinit var trackingService: TrackingStubService
 
     private var isSuccess by Delegates.notNull<Boolean>()
+    private var currentStudentId: String = ""
 
 
     init {
@@ -65,6 +68,7 @@ class MyToolWindowFactory : ToolWindowFactory {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
 
         val studentService = StudentStubService(ConfigFactory.createConfig())
+        trackingService = TrackingStubService(TrackingConfigFactory.createConfig())
 
         /**
          * LOGOVANJE KLIKTANJA POCETAK
@@ -125,7 +129,7 @@ class MyToolWindowFactory : ToolWindowFactory {
 
         studentsLastNameTF = JTextField(20)
         studentsLastNameTF.preferredSize = Dimension(300, 24)
-       // studentsLastNameTF.text = remoteStudentObject2.lastName
+        // studentsLastNameTF.text = remoteStudentObject2.lastName
         fieldsPanel.add(makeField("Last name:", studentsLastNameTF))
 
         this.studentEnrollmentInfoPanel = JPanel(GridLayout(0, 4))
@@ -168,23 +172,17 @@ class MyToolWindowFactory : ToolWindowFactory {
         subjectCB = JComboBox(subjectChoices)
         subjectCB.isEnabled = true
 
-        subjectCB.addActionListener {
-            val selectedTestName = subjectCB.selectedItem as? String ?: return@addActionListener
+        fun updateGroupsAndTerms() {
+            val selectedTestName = subjectCB.selectedItem as? String ?: return
             val selectedTest = allTestsWithAssigmentsData
-                .find { it.testName == selectedTestName } ?: return@addActionListener
-
-            val assignments = selectedTest.assigments ?: return@addActionListener
-            val groups = assignments.mapNotNull { it.group }
-                .distinct()
-                .toTypedArray()
-
-            val terms = assignments.mapNotNull { it.term }
-                .distinct()
-                .toTypedArray()
-
-            testGroupCB.model = DefaultComboBoxModel(groups)
-            studentsTermCB.model = DefaultComboBoxModel(terms)
+                .find { it.testName == selectedTestName } ?: return
+            val assignments = selectedTest.assigments ?: return
+            testGroupCB.model = DefaultComboBoxModel(assignments.mapNotNull { it.group }.distinct().toTypedArray())
+            studentsTermCB.model = DefaultComboBoxModel(assignments.mapNotNull { it.term }.distinct().toTypedArray())
         }
+
+        subjectCB.addActionListener { updateGroupsAndTerms() }
+        updateGroupsAndTerms()
 
         studentsTestSpecificPanel.add(subjectLabelText)
         studentsTestSpecificPanel.add(subjectCB)
@@ -225,6 +223,8 @@ class MyToolWindowFactory : ToolWindowFactory {
                     studentsStartYearTF.text,
                     studentsStudyProgramTF.text,
                     studentsTaskGroupTF.text,
+                    studentsFirstNameTF.text,
+                    studentsLastNameTF.text,
                     subjectCB.selectedItem?.toString(),
                     testGroupCB.selectedItem?.toString(),
                     studentsTermCB.selectedItem?.toString(),
@@ -232,8 +232,176 @@ class MyToolWindowFactory : ToolWindowFactory {
                 )
 
                 // `invokeLater` schedules this task to run on the Event Dispatch Thread (EDT).
-                ApplicationManager.getApplication().invokeLater (label@{
+                ApplicationManager.getApplication().invokeLater(label@{
                     if (isSuccess) {
+                        val studentId =
+                            "${studentsStudyProgramTF.text}-${studentsIndexNumberTF.text}-${studentsStartYearTF.text}"
+                        val taskId =
+                            "${subjectCB.selectedItem}-${testGroupCB.selectedItem}-${studentsTermCB.selectedItem}"
+                        //trackingService.startTracking(studentId, taskId)
+
+                        // ******************** ZARKO JE OVO DODAO ZA LISTENERE ZA ISPIT
+
+                        // ─────────────────────────────────────────
+                        // REAL-TIME FEEDBACK DASHBOARD — LISTENERI
+                        // ─────────────────────────────────────────
+
+
+                        // Brojači
+                        var keystrokeCount = 0
+                        var deletionBursts = 0
+                        var consecutiveDeletions = 0
+                        var classLines = 0
+                        var compileErrors = 0
+                        var runtimeErrors = 0
+                        val astNodes = mutableListOf<String>()
+
+// 1. Document listener — kucanje i brisanje
+                        val editor = FileEditorManager.getInstance(project).selectedTextEditor
+                        val document = editor?.document
+
+                        document?.addDocumentListener(
+                            object : com.intellij.openapi.editor.event.DocumentListener {
+                                override fun documentChanged(
+                                    event: com.intellij.openapi.editor.event.DocumentEvent
+                                ) {
+                                    val newText = event.newFragment.toString()
+                                    val oldText = event.oldFragment.toString()
+
+                                    if (newText.isNotEmpty()) {
+                                        keystrokeCount += newText.length
+                                    }
+
+                                    if (oldText.isNotEmpty() && newText.isEmpty()) {
+                                        consecutiveDeletions += oldText.length
+                                        if (consecutiveDeletions > 5) {
+                                            deletionBursts += consecutiveDeletions
+                                            consecutiveDeletions = 0
+                                        }
+                                    } else {
+                                        consecutiveDeletions = 0
+                                    }
+
+                                    classLines = event.document.lineCount
+
+                                    val text = event.document.text
+                                    astNodes.clear()
+                                    if (text.contains("if ") || text.contains("if("))
+                                        astNodes.add("IfStatement")
+                                    if (text.contains("for ") || text.contains("for("))
+                                        astNodes.add("ForStatement")
+                                    if (text.contains("while ") || text.contains("while("))
+                                        astNodes.add("WhileStatement")
+                                    if (text.contains("return "))
+                                        astNodes.add("ReturnStatement")
+                                    if (text.contains("class "))
+                                        astNodes.add("ClassDeclaration")
+                                    if (text.contains("fun ") || text.contains("void ") ||
+                                        text.contains("int ") || text.contains("String ")
+                                    )
+                                        astNodes.add("MethodDeclaration")
+                                    if (text.contains("try "))
+                                        astNodes.add("TryStatement")
+                                    if (text.contains("catch "))
+                                        astNodes.add("CatchClause")
+                                }
+                            }
+                        )
+
+// 2. Compile errors listener
+                        project.messageBus.connect().subscribe(
+                            com.intellij.codeInsight.daemon.DaemonCodeAnalyzer.DAEMON_EVENT_TOPIC,
+                            object : com.intellij.codeInsight.daemon.DaemonCodeAnalyzer.DaemonListener {
+                                override fun daemonFinished() {
+                                    ApplicationManager.getApplication().invokeLater {
+                                        val currentEditor = FileEditorManager.getInstance(project)
+                                            .selectedTextEditor ?: return@invokeLater
+
+                                        val highlights = com.intellij.codeInsight.daemon.impl
+                                            .DaemonCodeAnalyzerImpl.getHighlights(
+                                                currentEditor.document,
+                                                com.intellij.lang.annotation.HighlightSeverity.ERROR,
+                                                project
+                                            )
+
+                                        compileErrors = highlights.count { h ->
+                                            !h.description?.contains(
+                                                "runtime", ignoreCase = true
+                                            )!!
+                                        }
+
+                                        runtimeErrors = highlights.count { h ->
+                                            h.description?.contains(
+                                                "runtime", ignoreCase = true
+                                            ) == true ||
+                                                    h.description?.contains(
+                                                        "exception", ignoreCase = true
+                                                    ) == true
+                                        }
+                                    }
+                                }
+                            }
+                        )
+
+// 3. Timer — šalje paket svakih 30 sekundi
+                        val kolokvijumPocetak = System.currentTimeMillis()
+
+                        val feedbackTimer = javax.swing.Timer(30000) {
+                            val tCurrentMin = ((System.currentTimeMillis() -
+                                    kolokvijumPocetak) / 60000).toInt()
+
+                            val nodesJson = if (astNodes.isEmpty()) "[]"
+                            else astNodes.distinct().joinToString(
+                                separator = "\", \"",
+                                prefix = "[\"",
+                                postfix = "\"]"
+                            )
+
+                            val json = """
+        {
+            "student_id": "$studentId",
+            "timestamp": "${java.time.LocalDateTime.now()}",
+            "t_current": $tCurrentMin,
+            "t_total": 120,
+            "metrics": {
+                "keystroke_count": $keystrokeCount,
+                "compile_errors": $compileErrors,
+                "runtime_errors": $runtimeErrors,
+                "time_on_class_seconds": ${tCurrentMin * 60},
+                "class_line_count": $classLines,
+                "deletion_bursts": $deletionBursts,
+                "ast_nodes": $nodesJson
+            }
+        }
+    """.trimIndent()
+
+                            // Resetuj brojače
+                            keystrokeCount = 0
+                            deletionBursts = 0
+
+                            // Pošalji na server
+                            ApplicationManager.getApplication().executeOnPooledThread {
+                                try {
+                                    val url = java.net.URL("http://157.180.37.247/api/data")
+                                    val conn = url.openConnection() as java.net.HttpURLConnection
+                                    conn.requestMethod = "POST"
+                                    conn.setRequestProperty("Content-Type", "application/json")
+                                    conn.connectTimeout = 5000
+                                    conn.readTimeout = 5000
+                                    conn.doOutput = true
+                                    conn.outputStream.use { it.write(json.toByteArray()) }
+                                    val responseCode = conn.responseCode
+                                    println("Feedback API: $responseCode | student: $studentId")
+                                    conn.disconnect()
+                                } catch (e: Exception) {
+                                    println("Greška pri slanju metrika: ${e.message}")
+                                }
+                            }
+                        }
+                        feedbackTimer.start()
+                        println("Feedback Dashboard listeneri pokrenuti za: $studentId")
+
+                        // ******************** OVDE SE ZAVRSAVAJU ZARKOVI LISTENERI
 
                         ApplicationManager.getApplication().invokeLater {
 
@@ -330,7 +498,7 @@ class MyToolWindowFactory : ToolWindowFactory {
                 val isPushSuccess = studentService.submitAssignment(false)
 
                 // If the push operation is successful, close and dispose of the project
-                if(isPushSuccess){
+                if (isPushSuccess) {
                     JOptionPane.showMessageDialog(
                         null,
                         "Uspešno ste predali rad!",
@@ -362,6 +530,7 @@ class MyToolWindowFactory : ToolWindowFactory {
                     val isPushSuccess = studentService.submitAssignment(true)
 
                     if (isPushSuccess) {
+                        //trackingService.stopTracking(studentId)
                         finalSubmissionButton.isEnabled = false
                         //showSuccessPopup()
                         JOptionPane.showMessageDialog(
@@ -398,7 +567,7 @@ class MyToolWindowFactory : ToolWindowFactory {
 
         val checkProjectButton = JButton("Check Project")
 
-        initialPanel.add(Label(System.getProperty("user.name")))
+        initialPanel.add(JLabel(System.getProperty("user.name")))
         initialPanel.add(checkProjectButton)
 
         mainPanel.add(fieldsPanel, BorderLayout.NORTH)

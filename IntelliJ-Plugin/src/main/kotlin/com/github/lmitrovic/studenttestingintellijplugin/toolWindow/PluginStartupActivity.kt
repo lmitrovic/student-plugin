@@ -36,7 +36,9 @@ class PluginStartupActivity : StartupActivity {
             val latestVersion = matches.lastOrNull()?.groupValues?.get(1) ?: ""
 
             if (latestVersion.isNotEmpty() && latestVersion != currentVersion) {
-                showUpdateNotification(project, currentVersion, latestVersion)
+                ApplicationManager.getApplication().invokeLater {
+                    showUpdateNotification(project, currentVersion, latestVersion)
+                }
             }
         } catch (e: Exception) {
             println(e)
