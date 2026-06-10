@@ -30,6 +30,13 @@ import javax.swing.border.EmptyBorder
 import kotlin.properties.Delegates
 import raflms.trackingstub.api.TrackingStubService
 import raflms.trackingstub.config.ConfigFactory as TrackingConfigFactory
+import com.intellij.openapi.editor.event.EditorBackspaceListener
+import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.actionSystem.DataContext
+import com.intellij.openapi.editor.event.EditorKeyEvent
+import com.intellij.openapi.editor.event.EditorEventMulticaster
+import kotlin.text.RegexOption
+
 
 class MyToolWindowFactory : ToolWindowFactory {
 
@@ -242,73 +249,307 @@ class MyToolWindowFactory : ToolWindowFactory {
 
                         // ******************** ZARKO JE OVO DODAO ZA LISTENERE ZA ISPIT
 
-                        // ─────────────────────────────────────────
-                        // REAL-TIME FEEDBACK DASHBOARD — LISTENERI
-                        // ─────────────────────────────────────────
+                        // ──────────────────────────────────────────────────────────────────────────
+                        // REAL-TIME FEEDBACK DASHBOARD
+                        // ──────────────────────────────────────────────────────────────────────────
 
-
-                        // Brojači
+// Brojači
                         var keystrokeCount = 0
-                        var deletionBursts = 0
-                        var consecutiveDeletions = 0
+                        var deletionBursts = mutableListOf<Int>()  //
+                        var currentBurstSize = 0
+                        var inDeletionMode = false
+                        var lastEventTime = 0L
+                        val BURST_TIMEOUT_MS = 2000L  // 2 sekunde bez brisanja = novi burst
                         var classLines = 0
                         var compileErrors = 0
                         var runtimeErrors = 0
-                        val astNodes = mutableListOf<String>()
+                        var lastLinesCount = 0  // Za delta L (CFC)
+                        var currentFileStartTime = System.currentTimeMillis()  // Za CFC
+                        var currentFileName = ""  // Za CFC
 
-// 1. Document listener — kucanje i brisanje
+// Za CS - čuvanje istorije snapshot-ova
+                        val snapshotHistory = mutableListOf<Set<String>>()
+
+// 1. TYPED ACTION LISTENER — za keystroke (POUZDANIJI OD DocumentListener)
+                        project.messageBus.connect().subscribe(
+                            com.intellij.openapi.editor.action.TypedAction.TYPED_ACTION_TOPIC,
+                            object : com.intellij.openapi.editor.action.TypedActionListener {
+                                override fun beforeTyping(c: Char, context: DataContext, editor: Editor) {
+                                    // Ovo se poziva za SVAKI pritisnut taster
+                                    keystrokeCount++
+                                    println("KR DEBUG: Char='$c', total=$keystrokeCount")
+                                }
+
+                                override fun afterTyping(c: Char, context: DataContext, editor: Editor) {
+                                    // Nije obavzn
+                                }
+                            }
+                        )
+
+// 2. EDITOR BACKSPACE LISTENER — za brisanje
+                        project.messageBus.connect().subscribe(
+                            com.intellij.openapi.editor.event.EditorBackspaceListener.TOPIC,
+                            object : com.intellij.openapi.editor.event.EditorBackspaceListener {
+                                override fun beforeBackspace(editor: Editor, context: DataContext) {
+                                    val now = System.currentTimeMillis()
+                                    val selectionModel = editor.selectionModel
+                                    val caretModel = editor.caretModel
+
+                                    // Proverava da li je ovo novi burst (timeout)
+                                    if (!inDeletionMode || (now - lastEventTime) > BURST_TIMEOUT_MS) {
+                                        // Sačuvaj prethodni burst ako postoji
+                                        if (inDeletionMode && currentBurstSize > 0) {
+                                            if (currentBurstSize > 5) {
+                                                deletionBursts.add(currentBurstSize)
+                                                println("DB DEBUG: Burst saved: $currentBurstSize")
+                                            }
+                                        }
+                                        currentBurstSize = 0
+                                        inDeletionMode = true
+                                    }
+
+                                    // Racina koliko karaktera je obrisano
+                                    val deletedCount = if (selectionModel.hasSelection()) {
+                                        val selectedText = selectionModel.selectedText
+                                        selectedText?.length ?: 1
+                                    } else {
+                                        1  // Jedan karakter levo
+                                    }
+
+                                    currentBurstSize += deletedCount
+                                    lastEventTime = now
+                                    println("DB DEBUG: Deleted $deletedCount chars, burst size=$currentBurstSize")
+                                }
+
+                                override fun afterBackspace(editor: Editor, context: DataContext) {
+                                    // Opciono
+                                }
+                            }
+                        )
+
+// 3. EDITOR KEY LISTENER — za Delete taster (nije backspace)
+                        project.messageBus.connect().subscribe(
+                            com.intellij.openapi.editor.event.EditorEventMulticaster.EDITOR_KEY_TOPIC,
+                            object : com.intellij.openapi.editor.event.EditorKeyListener {
+                                override fun keyPressed(event: com.intellij.openapi.editor.event.EditorKeyEvent) {
+                                    val keyCode = event.keyCode
+                                    // Delete taster (ne backspace)
+                                    if (keyCode == java.awt.event.KeyEvent.VK_DELETE) {
+                                        val editor = event.editor
+                                        val selectionModel = editor.selectionModel
+
+                                        val now = System.currentTimeMillis()
+
+                                        // Proveri za novi burst
+                                        if (!inDeletionMode || (now - lastEventTime) > BURST_TIMEOUT_MS) {
+                                            if (inDeletionMode && currentBurstSize > 0) {
+                                                if (currentBurstSize > 5) {
+                                                    deletionBursts.add(currentBurstSize)
+                                                    println("DB DEBUG: Burst saved (Delete): $currentBurstSize")
+                                                }
+                                            }
+                                            currentBurstSize = 0
+                                            inDeletionMode = true
+                                        }
+
+                                        val deletedCount = if (selectionModel.hasSelection()) {
+                                            selectionModel.selectedText?.length ?: 1
+                                        } else {
+                                            1
+                                        }
+
+                                        currentBurstSize += deletedCount
+                                        lastEventTime = now
+                                        println("DB DEBUG: Delete key deleted $deletedCount chars, burst size=$currentBurstSize")
+                                    }
+                                }
+                            }
+                        )
+
+// 4. DOCUMENT LISTENER — za AST snapshot i linije koda
                         val editor = FileEditorManager.getInstance(project).selectedTextEditor
                         val document = editor?.document
 
                         document?.addDocumentListener(
                             object : com.intellij.openapi.editor.event.DocumentListener {
-                                override fun documentChanged(
-                                    event: com.intellij.openapi.editor.event.DocumentEvent
-                                ) {
-                                    val newText = event.newFragment.toString()
-                                    val oldText = event.oldFragment.toString()
-
-                                    if (newText.isNotEmpty()) {
-                                        keystrokeCount += newText.length
-                                    }
-
-                                    if (oldText.isNotEmpty() && newText.isEmpty()) {
-                                        consecutiveDeletions += oldText.length
-                                        if (consecutiveDeletions > 5) {
-                                            deletionBursts += consecutiveDeletions
-                                            consecutiveDeletions = 0
-                                        }
-                                    } else {
-                                        consecutiveDeletions = 0
-                                    }
-
+                                override fun documentChanged(event: com.intellij.openapi.editor.event.DocumentEvent) {
+                                    // Ažuriraj linije koda
                                     classLines = event.document.lineCount
 
+                                    // Pravljenje AST snapshot-a (samo ako je bilo promena)
                                     val text = event.document.text
-                                    astNodes.clear()
-                                    if (text.contains("if ") || text.contains("if("))
-                                        astNodes.add("IfStatement")
-                                    if (text.contains("for ") || text.contains("for("))
-                                        astNodes.add("ForStatement")
-                                    if (text.contains("while ") || text.contains("while("))
-                                        astNodes.add("WhileStatement")
-                                    if (text.contains("return "))
-                                        astNodes.add("ReturnStatement")
-                                    if (text.contains("class "))
-                                        astNodes.add("ClassDeclaration")
-                                    if (text.contains("fun ") || text.contains("void ") ||
-                                        text.contains("int ") || text.contains("String ")
-                                    )
-                                        astNodes.add("MethodDeclaration")
-                                    if (text.contains("try "))
-                                        astNodes.add("TryStatement")
-                                    if (text.contains("catch "))
-                                        astNodes.add("CatchClause")
+
+                                    // PAŽNJA: Ovo se poziva često! Radi samo neophodne operacije
+                                    // AST snapshot se pravi na svakih 30 sekundi u timer-u, ne ovde!
+                                }
+
+                                override fun beforeDocumentChange(event: com.intellij.openapi.editor.event.DocumentEvent) {
+                                    // Opciono: za naprednu detekciju brisanja
+                                    val oldLength = event.oldLength
+                                    val newLength = event.newLength
+
+                                    if (oldLength > newLength && !inDeletionMode) {
+                                        // Brisanje koje nije pokriveno backspace/delete (npr. cut)
+                                        val now = System.currentTimeMillis()
+                                        val deletedCount = oldLength - newLength
+
+                                        if (!inDeletionMode || (now - lastEventTime) > BURST_TIMEOUT_MS) {
+                                            if (inDeletionMode && currentBurstSize > 0) {
+                                                if (currentBurstSize > 5) {
+                                                    deletionBursts.add(currentBurstSize)
+                                                }
+                                            }
+                                            currentBurstSize = 0
+                                            inDeletionMode = true
+                                        }
+
+                                        currentBurstSize += deletedCount
+                                        lastEventTime = now
+                                        println("DB DEBUG: Cut/Bulk delete: $deletedCount chars")
+                                    }
                                 }
                             }
                         )
 
-// 2. Compile errors listener
+// 5. FILE EDITOR MANAGER LISTENER — za CFC (vreme na klasi)
+                        project.messageBus.connect().subscribe(
+                            com.intellij.openapi.fileEditor.FileEditorManagerListener.FILE_EDITOR_MANAGER,
+                            object : com.intellij.openapi.fileEditor.FileEditorManagerListener {
+                                override fun selectionChanged(event: com.intellij.openapi.fileEditor.FileEditorManagerEvent) {
+                                    val newFile = event.newFile
+                                    val oldFile = event.oldFile
+
+                                    val now = System.currentTimeMillis()
+
+                                    // Zabeleži vreme provedeno na staroj klasi
+                                    if (oldFile != null && currentFileName.isNotEmpty()) {
+                                        val timeSpent = now - currentFileStartTime
+                                        // totalTimeOnCurrentClass += timeSpent (ako treba)
+                                        println("CFC DEBUG: Left file '$currentFileName', spent ${timeSpent / 1000}s")
+                                    }
+
+                                    // Počni merenje za novu klasu
+                                    if (newFile != null) {
+                                        currentFileName = newFile.nameWithoutExtension
+                                        currentFileStartTime = now
+                                        println("CFC DEBUG: Opened file '$currentFileName'")
+                                    }
+                                }
+                            }
+                        )
+
+                        // 6. FUNKCIJA ZA PRAVLJENJE AST SNAPSHOT-A (ZA CS)
+                        fun getAstSnapshot(): Set<String> {
+                            val editor = FileEditorManager.getInstance(project).selectedTextEditor
+                            val document = editor?.document
+                            val text = document?.text ?: return emptySet()
+
+                            val nodes = mutableSetOf<String>()
+
+                            // Poboljšana detekcija (izbegavaj komentare i stringove)
+                            val lines = text.lines()
+                            var inComment = false
+                            var inString = false
+
+                            for (line in lines) {
+                                val trimmed = line.trim()
+
+                                // Preskoči prazne linije
+                                if (trimmed.isEmpty()) continue
+
+                                // Provera za komentare
+                                if (trimmed.startsWith("//")) continue
+                                if (trimmed.startsWith("/*")) inComment = true
+                                if (inComment && trimmed.contains("*/")) {
+                                    inComment = false
+                                    continue
+                                }
+                                if (inComment) continue
+
+                                // Provera za stringove (pojednostavljeno)
+                                if (trimmed.contains("\"") && !trimmed.startsWith("\"")) {
+                                    // Preskoči linije koje su u stringu (aproksimacija)
+                                    if (inString) inString = false
+                                    else if (trimmed.count { it == '"' } % 2 == 1) inString = true
+                                }
+                                if (inString) continue
+
+                                // Detekcija strukturnih elemenata
+                                when {
+                                    Regex("""^\s*(public|private|protected)?\s*(class|interface|enum)\s+(\w+)""").containsMatchIn(
+                                        trimmed
+                                    ) ->
+                                        nodes.add("ClassDeclaration")
+
+                                    Regex("""^\s*(public|private|protected)?\s*(static)?\s*(synchronized)?\s*(\w+)\s+(\w+)\s*\(""").containsMatchIn(
+                                        trimmed
+                                    ) ->
+                                        nodes.add("MethodDeclaration")
+
+                                    Regex("""^\s*if\s*\(""", RegexOption.IGNORE_CASE).containsMatchIn(trimmed) ->
+                                        nodes.add("IfStatement")
+
+                                    Regex("""^\s*for\s*\(""", RegexOption.IGNORE_CASE).containsMatchIn(trimmed) ->
+                                        nodes.add("ForStatement")
+
+                                    Regex("""^\s*while\s*\(""", RegexOption.IGNORE_CASE).containsMatchIn(trimmed) ->
+                                        nodes.add("WhileStatement")
+
+                                    Regex("""^\s*do\s*\{""", RegexOption.IGNORE_CASE).containsMatchIn(trimmed) ->
+                                        nodes.add("DoWhileStatement")
+
+                                    Regex("""^\s*return\s+""").containsMatchIn(trimmed) ->
+                                        nodes.add("ReturnStatement")
+
+                                    Regex("""^\s*try\s*\{""", RegexOption.IGNORE_CASE).containsMatchIn(trimmed) ->
+                                        nodes.add("TryStatement")
+
+                                    Regex("""^\s*catch\s*\(""", RegexOption.IGNORE_CASE).containsMatchIn(trimmed) ->
+                                        nodes.add("CatchClause")
+
+                                    Regex("""^\s*switch\s*\(""", RegexOption.IGNORE_CASE).containsMatchIn(trimmed) ->
+                                        nodes.add("SwitchStatement")
+
+                                    Regex("""^\s*case\s+""", RegexOption.IGNORE_CASE).containsMatchIn(trimmed) ->
+                                        nodes.add("CaseClause")
+
+                                    Regex("""^\s*break;?""", RegexOption.IGNORE_CASE).containsMatchIn(trimmed) ->
+                                        nodes.add("BreakStatement")
+                                }
+                            }
+
+                            return nodes
+                        }
+
+                        // 7. FUNKCIJA ZA JACCARD SLIČNOST (ZA CS)
+                        fun calculateJaccardSimilarity(snapshots: List<Set<String>>): Double {
+                            if (snapshots.size < 2) return 1.0
+
+                            var totalSimilarity = 0.0
+                            var pairCount = 0
+
+                            for (i in snapshots.indices) {
+                                for (j in i + 1 until snapshots.size) {
+                                    val set1 = snapshots[i]
+                                    val set2 = snapshots[j]
+
+                                    if (set1.isEmpty() && set2.isEmpty()) {
+                                        totalSimilarity += 1.0
+                                    } else if (set1.isEmpty() || set2.isEmpty()) {
+                                        totalSimilarity += 0.0
+                                    } else {
+                                        val intersection = set1.intersect(set2).size
+                                        val union = set1.union(set2).size
+                                        totalSimilarity += intersection.toDouble() / union.toDouble()
+                                    }
+                                    pairCount++
+                                }
+                            }
+
+                            return if (pairCount > 0) totalSimilarity / pairCount else 1.0
+                        }
+
+// 8. COMPILE ERRORS LISTENER (radi OK)
                         project.messageBus.connect().subscribe(
                             com.intellij.codeInsight.daemon.DaemonCodeAnalyzer.DAEMON_EVENT_TOPIC,
                             object : com.intellij.codeInsight.daemon.DaemonCodeAnalyzer.DaemonListener {
@@ -324,62 +565,125 @@ class MyToolWindowFactory : ToolWindowFactory {
                                                 project
                                             )
 
-                                        compileErrors = highlights.count { h ->
-                                            !h.description?.contains(
-                                                "runtime", ignoreCase = true
-                                            )!!
+                                        val newCompileErrors = highlights.count { h ->
+                                            val desc = h.description ?: ""
+                                            !desc.contains("runtime", ignoreCase = true) &&
+                                                    !desc.contains("exception", ignoreCase = true)
                                         }
 
-                                        runtimeErrors = highlights.count { h ->
-                                            h.description?.contains(
-                                                "runtime", ignoreCase = true
-                                            ) == true ||
-                                                    h.description?.contains(
-                                                        "exception", ignoreCase = true
-                                                    ) == true
+                                        val newRuntimeErrors = highlights.count { h ->
+                                            val desc = h.description ?: ""
+                                            desc.contains("runtime", ignoreCase = true) ||
+                                                    desc.contains("exception", ignoreCase = true)
                                         }
+
+                                        // Akumuliraj za 30s prozor
+                                        compileErrors += newCompileErrors
+                                        runtimeErrors += newRuntimeErrors
+
+                                        println("ER DEBUG: Compile=$newCompileErrors, Runtime=$newRuntimeErrors, totals=($compileErrors, $runtimeErrors)")
                                     }
                                 }
                             }
                         )
 
-// 3. Timer — šalje paket svakih 30 sekundi
+// 9. TIMER — šalje paket svakih 20 sekundi
                         val kolokvijumPocetak = System.currentTimeMillis()
 
-                        val feedbackTimer = javax.swing.Timer(30000) {
-                            val tCurrentMin = ((System.currentTimeMillis() -
-                                    kolokvijumPocetak) / 60000).toInt()
+                        val feedbackTimer = javax.swing.Timer(20000) {
+                            val now = System.currentTimeMillis()
+                            val tCurrentSec = ((now - kolokvijumPocetak) / 1000).toInt()
 
-                            val nodesJson = if (astNodes.isEmpty()) "[]"
-                            else astNodes.distinct().joinToString(
+                            // === 1. PRIKUPI TRENUTNI AST SNAPSHOT ZA CS ===
+                            val currentSnapshot = getAstSnapshot()
+
+                            // Dodaj u istoriju (čuvamo zadnjih 10 snapshot-ova za 5 minuta)
+                            snapshotHistory.add(currentSnapshot)
+                            while (snapshotHistory.size > 10) {
+                                snapshotHistory.removeFirst()
+                            }
+
+                            // === 2. IZRAČUNAJ CS (samo ako imamo dovoljno snapshot-ova) ===
+                            val csValue = if (snapshotHistory.size >= 2 && keystrokeCount > 0) {
+                                // Samo računaj CS ako je bilo keystroke-ova!
+                                calculateJaccardSimilarity(snapshotHistory)
+                            } else if (snapshotHistory.size >= 2 && keystrokeCount == 0) {
+                                // Nema keystroke-ova, CS treba da bude 1.0 (nema promene)
+                                1.0
+                            } else {
+                                1.0
+                            }
+
+                            // === 3. IZRAČUNAJ DELTA L ZA CFC ===
+                            val currentLines = classLines
+                            val deltaL = currentLines - lastLinesCount
+                            lastLinesCount = currentLines
+
+                            // === 4. IZRAČUNAJ VREME NA TEKUĆOJ KLASI ===
+                            val timeOnClassSec = if (currentFileName.isNotEmpty()) {
+                                (now - currentFileStartTime) / 1000
+                            } else {
+                                0
+                            }
+
+                            // === 5. ZAVRŠI TEKUĆI BURST BRISANJA ===
+                            if (inDeletionMode && currentBurstSize > 0) {
+                                if (currentBurstSize > 5) {
+                                    deletionBursts.add(currentBurstSize)
+                                    println("DB DEBUG: Final burst saved: $currentBurstSize")
+                                }
+                                inDeletionMode = false
+                                currentBurstSize = 0
+                            }
+
+                            // === 6. PRIPREMI JSON ZA SLANJE ===
+                            val nodesJson = if (currentSnapshot.isEmpty()) "[]"
+                            else currentSnapshot.joinToString(
                                 separator = "\", \"",
                                 prefix = "[\"",
                                 postfix = "\"]"
                             )
 
+                            val deletionBurstsJson = if (deletionBursts.isEmpty()) "[]"
+                            else deletionBursts.joinToString(separator = ", ", prefix = "[", postfix = "]")
+
                             val json = """
-        {
-            "student_id": "$studentId",
-            "timestamp": "${java.time.LocalDateTime.now()}",
-            "t_current": $tCurrentMin,
-            "t_total": 120,
-            "metrics": {
-                "keystroke_count": $keystrokeCount,
-                "compile_errors": $compileErrors,
-                "runtime_errors": $runtimeErrors,
-                "time_on_class_seconds": ${tCurrentMin * 60},
-                "class_line_count": $classLines,
-                "deletion_bursts": $deletionBursts,
-                "ast_nodes": $nodesJson
-            }
-        }
+{
+    "student_id": "$studentId",
+    "timestamp": "${java.time.LocalDateTime.now()}",
+    "window_start_sec": ${tCurrentSec - 20},
+    "window_end_sec": $tCurrentSec,
+    "t_current_min": ${tCurrentSec / 60},
+    "t_total_min": 120,
+    "metrics": {
+        "keystroke_count": $keystrokeCount,
+        "compile_errors": $compileErrors,
+        "runtime_errors": $runtimeErrors,
+        "time_on_class_seconds": $timeOnClassSec,
+        "class_line_count": $currentLines,
+        "delta_lines": $deltaL,
+        "deletion_bursts": $deletionBurstsJson,
+        "ast_nodes": $nodesJson,
+        "cs_value": $csValue,
+        "snapshot_history_size": ${snapshotHistory.size}
+    }
+}
     """.trimIndent()
 
-                            // Resetuj brojače
-                            keystrokeCount = 0
-                            deletionBursts = 0
+                            // Debug logging
+                            println("=== WINDOW ${tCurrentSec / 20} ===")
+                            println("KR: $keystrokeCount, DB: ${deletionBursts.joinToString()}, CS: $csValue")
+                            println("ER: compile=$compileErrors, runtime=$runtimeErrors")
+                            println("CFC: timeOnClass=$timeOnClassSec sec, deltaL=$deltaL")
 
-                            // Pošalji na server
+                            // === 7. RESETUJ BROJAČE ZA SLEDEĆI PROZOR ===
+                            keystrokeCount = 0
+                            compileErrors = 0
+                            runtimeErrors = 0
+                            deletionBursts = mutableListOf()  // Resetuj listu
+                            // NE resetujemo snapshotHistory! On treba da čuva zadnjih 10
+
+                            // === 8. POŠALJI NA SERVER ===
                             ApplicationManager.getApplication().executeOnPooledThread {
                                 try {
                                     val url = java.net.URL("http://157.180.37.247/api/data")
@@ -391,13 +695,14 @@ class MyToolWindowFactory : ToolWindowFactory {
                                     conn.doOutput = true
                                     conn.outputStream.use { it.write(json.toByteArray()) }
                                     val responseCode = conn.responseCode
-                                    println("Feedback API: $responseCode | student: $studentId")
+                                    println("Feedback API: $responseCode | student: $studentId | KR=$keystrokeCount")
                                     conn.disconnect()
                                 } catch (e: Exception) {
                                     println("Greška pri slanju metrika: ${e.message}")
                                 }
                             }
                         }
+
                         feedbackTimer.start()
                         println("Feedback Dashboard listeneri pokrenuti za: $studentId")
 
