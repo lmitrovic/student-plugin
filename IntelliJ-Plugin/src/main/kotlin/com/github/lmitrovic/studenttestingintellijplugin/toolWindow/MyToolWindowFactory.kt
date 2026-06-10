@@ -246,36 +246,34 @@ class MyToolWindowFactory : ToolWindowFactory {
                         //trackingService.startTracking(studentId, taskId)
 
                         // ******************** ZARKO JE OVO DODAO ZA LISTENERE ZA ISPIT
-
-                        // ──────────────────────────────────────────────────────────────────────────
-                        // REAL-TIME FEEDBACK DASHBOARD
-                        // ──────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────
+// REAL-TIME FEEDBACK DASHBOARD
+// ──────────────────────────────────────────────────────────────────────────
 
 // Brojači
                         var keystrokeCount = 0
-                        var deletionBursts = mutableListOf<Int>()  //
+                        var deletionBursts = mutableListOf<Int>()
                         var currentBurstSize = 0
                         var inDeletionMode = false
                         var lastEventTime = 0L
-                        val BURST_TIMEOUT_MS = 2000L  // 2 sekunde bez brisanja = novi burst
+                        val BURST_TIMEOUT_MS = 2000L
                         var classLines = 0
                         var compileErrors = 0
                         var runtimeErrors = 0
-                        var lastLinesCount = 0  // Za delta L (CFC)
-                        var currentFileStartTime = System.currentTimeMillis()  // Za CFC
-                        var currentFileName = ""  // Za CFC
+                        var lastLinesCount = 0
+                        var currentFileStartTime = System.currentTimeMillis()
+                        var currentFileName = ""
 
-// Za CS - čuvanje istorije snapshot-ova
                         val snapshotHistory = mutableListOf<Set<String>>()
+
+// 1. DOCUMENT LISTENER — za keystroke brojanje i brisanje
                         val editor = FileEditorManager.getInstance(project).selectedTextEditor
                         val document = editor?.document
-// 1. TYPED ACTION LISTENER — za keystroke (POUZDANIJI OD DocumentListener)
+
                         document?.addDocumentListener(
                             object : com.intellij.openapi.editor.event.DocumentListener {
                                 override fun documentChanged(event: com.intellij.openapi.editor.event.DocumentEvent) {
                                     classLines = event.document.lineCount
-
-                                    // Broji kucanje: ako je dodat 1 karakter (nije brisanje)
                                     val added = event.newLength - event.oldLength
                                     if (added > 0) {
                                         keystrokeCount += added
@@ -292,10 +290,8 @@ class MyToolWindowFactory : ToolWindowFactory {
                                         val deletedCount = oldLength - newLength
 
                                         if (!inDeletionMode || (now - lastEventTime) > BURST_TIMEOUT_MS) {
-                                            if (inDeletionMode && currentBurstSize > 0) {
-                                                if (currentBurstSize > 5) {
-                                                    deletionBursts.add(currentBurstSize)
-                                                }
+                                            if (inDeletionMode && currentBurstSize > 0 && currentBurstSize > 5) {
+                                                deletionBursts.add(currentBurstSize)
                                             }
                                             currentBurstSize = 0
                                             inDeletionMode = true
@@ -309,7 +305,7 @@ class MyToolWindowFactory : ToolWindowFactory {
                             }
                         )
 
-// 2. EDITOR BACKSPACE LISTENER — za brisanje
+// 2. COMMAND LISTENER — za backspace/delete brisanje
                         project.messageBus.connect().subscribe(
                             com.intellij.openapi.command.CommandListener.TOPIC,
                             object : com.intellij.openapi.command.CommandListener {
@@ -318,10 +314,10 @@ class MyToolWindowFactory : ToolWindowFactory {
                                     if (commandName.contains("BackSpace", ignoreCase = true) ||
                                         commandName.contains("Delete", ignoreCase = true)
                                     ) {
-
-                                        val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return
+                                        val currentEditor =
+                                            FileEditorManager.getInstance(project).selectedTextEditor ?: return
                                         val now = System.currentTimeMillis()
-                                        val selectionModel = editor.selectionModel
+                                        val selectionModel = currentEditor.selectionModel
 
                                         if (!inDeletionMode || (now - lastEventTime) > BURST_TIMEOUT_MS) {
                                             if (inDeletionMode && currentBurstSize > 0 && currentBurstSize > 5) {
@@ -345,17 +341,15 @@ class MyToolWindowFactory : ToolWindowFactory {
                             }
                         )
 
-// 3. EDITOR KEY LISTENER — za Delete taster (nije backspace)
-                        // Zamena za EDITOR_KEY_TOPIC / EditorKeyListener
+// 3. KEY DISPATCHER — za Delete taster
                         val keyDispatcher = java.awt.KeyEventDispatcher { keyEvent ->
                             if (keyEvent.id == java.awt.event.KeyEvent.KEY_PRESSED &&
                                 keyEvent.keyCode == java.awt.event.KeyEvent.VK_DELETE
                             ) {
-
-                                val editor = FileEditorManager.getInstance(project).selectedTextEditor
-                                if (editor != null) {
+                                val currentEditor = FileEditorManager.getInstance(project).selectedTextEditor
+                                if (currentEditor != null) {
                                     val now = System.currentTimeMillis()
-                                    val selectionModel = editor.selectionModel
+                                    val selectionModel = currentEditor.selectionModel
 
                                     if (!inDeletionMode || (now - lastEventTime) > BURST_TIMEOUT_MS) {
                                         if (inDeletionMode && currentBurstSize > 0 && currentBurstSize > 5) {
@@ -376,75 +370,26 @@ class MyToolWindowFactory : ToolWindowFactory {
                                     println("DB DEBUG: Delete key deleted $deletedCount chars, burst=$currentBurstSize")
                                 }
                             }
-                            false // ne konzumiraj event
+                            false
                         }
 
                         java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager()
                             .addKeyEventDispatcher(keyDispatcher)
 
-// 4. DOCUMENT LISTENER — za AST snapshot i linije koda
-                        val editor = FileEditorManager.getInstance(project).selectedTextEditor
-                        val document = editor?.document
-
-                        document?.addDocumentListener(
-                            object : com.intellij.openapi.editor.event.DocumentListener {
-                                override fun documentChanged(event: com.intellij.openapi.editor.event.DocumentEvent) {
-                                    // Ažuriraj linije koda
-                                    classLines = event.document.lineCount
-
-                                    // Pravljenje AST snapshot-a (samo ako je bilo promena)
-                                    val text = event.document.text
-
-                                    // PAŽNJA: Ovo se poziva često! Radi samo neophodne operacije
-                                    // AST snapshot se pravi na svakih 30 sekundi u timer-u, ne ovde!
-                                }
-
-                                override fun beforeDocumentChange(event: com.intellij.openapi.editor.event.DocumentEvent) {
-                                    // Opciono: za naprednu detekciju brisanja
-                                    val oldLength = event.oldLength
-                                    val newLength = event.newLength
-
-                                    if (oldLength > newLength && !inDeletionMode) {
-                                        // Brisanje koje nije pokriveno backspace/delete (npr. cut)
-                                        val now = System.currentTimeMillis()
-                                        val deletedCount = oldLength - newLength
-
-                                        if (!inDeletionMode || (now - lastEventTime) > BURST_TIMEOUT_MS) {
-                                            if (inDeletionMode && currentBurstSize > 0) {
-                                                if (currentBurstSize > 5) {
-                                                    deletionBursts.add(currentBurstSize)
-                                                }
-                                            }
-                                            currentBurstSize = 0
-                                            inDeletionMode = true
-                                        }
-
-                                        currentBurstSize += deletedCount
-                                        lastEventTime = now
-                                        println("DB DEBUG: Cut/Bulk delete: $deletedCount chars")
-                                    }
-                                }
-                            }
-                        )
-
-// 5. FILE EDITOR MANAGER LISTENER — za CFC (vreme na klasi)
+// 4. FILE EDITOR MANAGER LISTENER — za CFC (vreme na klasi)
                         project.messageBus.connect().subscribe(
                             com.intellij.openapi.fileEditor.FileEditorManagerListener.FILE_EDITOR_MANAGER,
                             object : com.intellij.openapi.fileEditor.FileEditorManagerListener {
                                 override fun selectionChanged(event: com.intellij.openapi.fileEditor.FileEditorManagerEvent) {
                                     val newFile = event.newFile
                                     val oldFile = event.oldFile
-
                                     val now = System.currentTimeMillis()
 
-                                    // Zabeleži vreme provedeno na staroj klasi
                                     if (oldFile != null && currentFileName.isNotEmpty()) {
                                         val timeSpent = now - currentFileStartTime
-                                        // totalTimeOnCurrentClass += timeSpent (ako treba)
                                         println("CFC DEBUG: Left file '$currentFileName', spent ${timeSpent / 1000}s")
                                     }
 
-                                    // Počni merenje za novu klasu
                                     if (newFile != null) {
                                         currentFileName = newFile.nameWithoutExtension
                                         currentFileStartTime = now
@@ -454,43 +399,32 @@ class MyToolWindowFactory : ToolWindowFactory {
                             }
                         )
 
-                        // 6. FUNKCIJA ZA PRAVLJENJE AST SNAPSHOT-A (ZA CS)
+                        // 5. FUNKCIJA ZA PRAVLJENJE AST SNAPSHOT-A
                         fun getAstSnapshot(): Set<String> {
-                            val editor = FileEditorManager.getInstance(project).selectedTextEditor
-                            val document = editor?.document
-                            val text = document?.text ?: return emptySet()
+                            val snapEditor = FileEditorManager.getInstance(project).selectedTextEditor
+                            val text = snapEditor?.document?.text ?: return emptySet()
 
                             val nodes = mutableSetOf<String>()
-
-                            // Poboljšana detekcija (izbegavaj komentare i stringove)
                             val lines = text.lines()
                             var inComment = false
                             var inString = false
 
                             for (line in lines) {
                                 val trimmed = line.trim()
-
-                                // Preskoči prazne linije
                                 if (trimmed.isEmpty()) continue
-
-                                // Provera za komentare
                                 if (trimmed.startsWith("//")) continue
                                 if (trimmed.startsWith("/*")) inComment = true
                                 if (inComment && trimmed.contains("*/")) {
-                                    inComment = false
-                                    continue
+                                    inComment = false; continue
                                 }
                                 if (inComment) continue
 
-                                // Provera za stringove (pojednostavljeno)
                                 if (trimmed.contains("\"") && !trimmed.startsWith("\"")) {
-                                    // Preskoči linije koje su u stringu (aproksimacija)
                                     if (inString) inString = false
                                     else if (trimmed.count { it == '"' } % 2 == 1) inString = true
                                 }
                                 if (inString) continue
 
-                                // Detekcija strukturnih elemenata
                                 when {
                                     Regex("""^\s*(public|private|protected)?\s*(class|interface|enum)\s+(\w+)""").containsMatchIn(
                                         trimmed
@@ -533,14 +467,12 @@ class MyToolWindowFactory : ToolWindowFactory {
                                         nodes.add("BreakStatement")
                                 }
                             }
-
                             return nodes
                         }
 
-                        // 7. FUNKCIJA ZA JACCARD SLIČNOST (ZA CS)
+                        // 6. FUNKCIJA ZA JACCARD SLIČNOST
                         fun calculateJaccardSimilarity(snapshots: List<Set<String>>): Double {
                             if (snapshots.size < 2) return 1.0
-
                             var totalSimilarity = 0.0
                             var pairCount = 0
 
@@ -548,24 +480,18 @@ class MyToolWindowFactory : ToolWindowFactory {
                                 for (j in i + 1 until snapshots.size) {
                                     val set1 = snapshots[i]
                                     val set2 = snapshots[j]
-
-                                    if (set1.isEmpty() && set2.isEmpty()) {
-                                        totalSimilarity += 1.0
-                                    } else if (set1.isEmpty() || set2.isEmpty()) {
-                                        totalSimilarity += 0.0
-                                    } else {
-                                        val intersection = set1.intersect(set2).size
-                                        val union = set1.union(set2).size
-                                        totalSimilarity += intersection.toDouble() / union.toDouble()
+                                    totalSimilarity += when {
+                                        set1.isEmpty() && set2.isEmpty() -> 1.0
+                                        set1.isEmpty() || set2.isEmpty() -> 0.0
+                                        else -> set1.intersect(set2).size.toDouble() / set1.union(set2).size.toDouble()
                                     }
                                     pairCount++
                                 }
                             }
-
                             return if (pairCount > 0) totalSimilarity / pairCount else 1.0
                         }
 
-// 8. COMPILE ERRORS LISTENER (radi OK)
+// 7. COMPILE ERRORS LISTENER
                         project.messageBus.connect().subscribe(
                             com.intellij.codeInsight.daemon.DaemonCodeAnalyzer.DAEMON_EVENT_TOPIC,
                             object : com.intellij.codeInsight.daemon.DaemonCodeAnalyzer.DaemonListener {
@@ -581,68 +507,51 @@ class MyToolWindowFactory : ToolWindowFactory {
                                                 project
                                             )
 
-                                        val newCompileErrors = highlights.count { h ->
+                                        compileErrors += highlights.count { h ->
                                             val desc = h.description ?: ""
                                             !desc.contains("runtime", ignoreCase = true) &&
                                                     !desc.contains("exception", ignoreCase = true)
                                         }
 
-                                        val newRuntimeErrors = highlights.count { h ->
+                                        runtimeErrors += highlights.count { h ->
                                             val desc = h.description ?: ""
                                             desc.contains("runtime", ignoreCase = true) ||
                                                     desc.contains("exception", ignoreCase = true)
                                         }
 
-                                        // Akumuliraj za 30s prozor
-                                        compileErrors += newCompileErrors
-                                        runtimeErrors += newRuntimeErrors
-
-                                        println("ER DEBUG: Compile=$newCompileErrors, Runtime=$newRuntimeErrors, totals=($compileErrors, $runtimeErrors)")
+                                        println("ER DEBUG: compile=$compileErrors, runtime=$runtimeErrors")
                                     }
                                 }
                             }
                         )
 
-// 9. TIMER — šalje paket svakih 20 sekundi
+// 8. TIMER — šalje paket svakih 20 sekundi
                         val kolokvijumPocetak = System.currentTimeMillis()
 
                         val feedbackTimer = javax.swing.Timer(20000) {
                             val now = System.currentTimeMillis()
                             val tCurrentSec = ((now - kolokvijumPocetak) / 1000).toInt()
 
-                            // === 1. PRIKUPI TRENUTNI AST SNAPSHOT ZA CS ===
                             val currentSnapshot = getAstSnapshot()
-
-                            // Dodaj u istoriju (čuvamo zadnjih 10 snapshot-ova za 5 minuta)
                             snapshotHistory.add(currentSnapshot)
-                            while (snapshotHistory.size > 10) {
-                                snapshotHistory.removeFirst()
-                            }
+                            while (snapshotHistory.size > 10) snapshotHistory.removeFirst()
 
-                            // === 2. IZRAČUNAJ CS (samo ako imamo dovoljno snapshot-ova) ===
-                            val csValue = if (snapshotHistory.size >= 2 && keystrokeCount > 0) {
-                                // Samo računaj CS ako je bilo keystroke-ova!
+                            val csValue = if (snapshotHistory.size >= 2) {
                                 calculateJaccardSimilarity(snapshotHistory)
-                            } else if (snapshotHistory.size >= 2 && keystrokeCount == 0) {
-                                // Nema keystroke-ova, CS treba da bude 1.0 (nema promene)
-                                1.0
                             } else {
                                 1.0
                             }
 
-                            // === 3. IZRAČUNAJ DELTA L ZA CFC ===
                             val currentLines = classLines
                             val deltaL = currentLines - lastLinesCount
                             lastLinesCount = currentLines
 
-                            // === 4. IZRAČUNAJ VREME NA TEKUĆOJ KLASI ===
                             val timeOnClassSec = if (currentFileName.isNotEmpty()) {
                                 (now - currentFileStartTime) / 1000
                             } else {
                                 0
                             }
 
-                            // === 5. ZAVRŠI TEKUĆI BURST BRISANJA ===
                             if (inDeletionMode && currentBurstSize > 0) {
                                 if (currentBurstSize > 5) {
                                     deletionBursts.add(currentBurstSize)
@@ -652,13 +561,8 @@ class MyToolWindowFactory : ToolWindowFactory {
                                 currentBurstSize = 0
                             }
 
-                            // === 6. PRIPREMI JSON ZA SLANJE ===
                             val nodesJson = if (currentSnapshot.isEmpty()) "[]"
-                            else currentSnapshot.joinToString(
-                                separator = "\", \"",
-                                prefix = "[\"",
-                                postfix = "\"]"
-                            )
+                            else currentSnapshot.joinToString(separator = "\", \"", prefix = "[\"", postfix = "\"]")
 
                             val deletionBurstsJson = if (deletionBursts.isEmpty()) "[]"
                             else deletionBursts.joinToString(separator = ", ", prefix = "[", postfix = "]")
@@ -686,20 +590,16 @@ class MyToolWindowFactory : ToolWindowFactory {
 }
     """.trimIndent()
 
-                            // Debug logging
                             println("=== WINDOW ${tCurrentSec / 20} ===")
                             println("KR: $keystrokeCount, DB: ${deletionBursts.joinToString()}, CS: $csValue")
                             println("ER: compile=$compileErrors, runtime=$runtimeErrors")
                             println("CFC: timeOnClass=$timeOnClassSec sec, deltaL=$deltaL")
 
-                            // === 7. RESETUJ BROJAČE ZA SLEDEĆI PROZOR ===
                             keystrokeCount = 0
                             compileErrors = 0
                             runtimeErrors = 0
-                            deletionBursts = mutableListOf()  // Resetuj listu
-                            // NE resetujemo snapshotHistory! On treba da čuva zadnjih 10
+                            deletionBursts = mutableListOf()
 
-                            // === 8. POŠALJI NA SERVER ===
                             ApplicationManager.getApplication().executeOnPooledThread {
                                 try {
                                     val url = java.net.URL("http://157.180.37.247/api/data")
@@ -711,7 +611,7 @@ class MyToolWindowFactory : ToolWindowFactory {
                                     conn.doOutput = true
                                     conn.outputStream.use { it.write(json.toByteArray()) }
                                     val responseCode = conn.responseCode
-                                    println("Feedback API: $responseCode | student: $studentId | KR=$keystrokeCount")
+                                    println("Feedback API: $responseCode | student: $studentId")
                                     conn.disconnect()
                                 } catch (e: Exception) {
                                     println("Greška pri slanju metrika: ${e.message}")
@@ -721,7 +621,6 @@ class MyToolWindowFactory : ToolWindowFactory {
 
                         feedbackTimer.start()
                         println("Feedback Dashboard listeneri pokrenuti za: $studentId")
-
                         // ******************** OVDE SE ZAVRSAVAJU ZARKOVI LISTENERI
 
                         ApplicationManager.getApplication().invokeLater {
