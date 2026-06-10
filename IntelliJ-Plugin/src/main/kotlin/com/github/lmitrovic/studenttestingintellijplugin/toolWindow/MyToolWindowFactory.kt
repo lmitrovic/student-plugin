@@ -269,17 +269,41 @@ class MyToolWindowFactory : ToolWindowFactory {
                         val snapshotHistory = mutableListOf<Set<String>>()
 
 // 1. TYPED ACTION LISTENER — za keystroke (POUZDANIJI OD DocumentListener)
-                        project.messageBus.connect().subscribe(
-                            com.intellij.openapi.editor.action.TypedAction.TYPED_ACTION_TOPIC,
-                            object : com.intellij.openapi.editor.action.TypedActionListener {
-                                override fun beforeTyping(c: Char, context: DataContext, editor: Editor) {
-                                    // Ovo se poziva za SVAKI pritisnut taster
-                                    keystrokeCount++
-                                    println("KR DEBUG: Char='$c', total=$keystrokeCount")
+                        document?.addDocumentListener(
+                            object : com.intellij.openapi.editor.event.DocumentListener {
+                                override fun documentChanged(event: com.intellij.openapi.editor.event.DocumentEvent) {
+                                    classLines = event.document.lineCount
+
+                                    // Broji kucanje: ako je dodat 1 karakter (nije brisanje)
+                                    val added = event.newLength - event.oldLength
+                                    if (added > 0) {
+                                        keystrokeCount += added
+                                        println("KR DEBUG: +$added chars, total=$keystrokeCount")
+                                    }
                                 }
 
-                                override fun afterTyping(c: Char, context: DataContext, editor: Editor) {
-                                    // Nije obavzn
+                                override fun beforeDocumentChange(event: com.intellij.openapi.editor.event.DocumentEvent) {
+                                    val oldLength = event.oldLength
+                                    val newLength = event.newLength
+
+                                    if (oldLength > newLength && !inDeletionMode) {
+                                        val now = System.currentTimeMillis()
+                                        val deletedCount = oldLength - newLength
+
+                                        if (!inDeletionMode || (now - lastEventTime) > BURST_TIMEOUT_MS) {
+                                            if (inDeletionMode && currentBurstSize > 0) {
+                                                if (currentBurstSize > 5) {
+                                                    deletionBursts.add(currentBurstSize)
+                                                }
+                                            }
+                                            currentBurstSize = 0
+                                            inDeletionMode = true
+                                        }
+
+                                        currentBurstSize += deletedCount
+                                        lastEventTime = now
+                                        println("DB DEBUG: Cut/Bulk delete: $deletedCount chars")
+                                    }
                                 }
                             }
                         )
@@ -291,7 +315,8 @@ class MyToolWindowFactory : ToolWindowFactory {
                                 override fun beforeCommandFinished(event: com.intellij.openapi.command.CommandEvent) {
                                     val commandName = event.commandName ?: return
                                     if (commandName.contains("BackSpace", ignoreCase = true) ||
-                                        commandName.contains("Delete", ignoreCase = true)) {
+                                        commandName.contains("Delete", ignoreCase = true)
+                                    ) {
 
                                         val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return
                                         val now = System.currentTimeMillis()
@@ -323,7 +348,8 @@ class MyToolWindowFactory : ToolWindowFactory {
                         // Zamena za EDITOR_KEY_TOPIC / EditorKeyListener
                         val keyDispatcher = java.awt.KeyEventDispatcher { keyEvent ->
                             if (keyEvent.id == java.awt.event.KeyEvent.KEY_PRESSED &&
-                                keyEvent.keyCode == java.awt.event.KeyEvent.VK_DELETE) {
+                                keyEvent.keyCode == java.awt.event.KeyEvent.VK_DELETE
+                            ) {
 
                                 val editor = FileEditorManager.getInstance(project).selectedTextEditor
                                 if (editor != null) {
