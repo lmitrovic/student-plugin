@@ -267,7 +267,8 @@ class MyToolWindowFactory : ToolWindowFactory {
 
 // Za CS - čuvanje istorije snapshot-ova
                         val snapshotHistory = mutableListOf<Set<String>>()
-
+                        val editor = FileEditorManager.getInstance(project).selectedTextEditor
+                        val document = editor?.document
 // 1. TYPED ACTION LISTENER — za keystroke (POUZDANIJI OD DocumentListener)
                         document?.addDocumentListener(
                             object : com.intellij.openapi.editor.event.DocumentListener {
