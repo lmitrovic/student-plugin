@@ -564,8 +564,7 @@ class MyToolWindowFactory : ToolWindowFactory {
                             val nodesJson = if (currentSnapshot.isEmpty()) "[]"
                             else currentSnapshot.joinToString(separator = "\", \"", prefix = "[\"", postfix = "\"]")
 
-                            val deletionBurstsJson = if (deletionBursts.isEmpty()) "[]"
-                            else deletionBursts.joinToString(separator = ", ", prefix = "[", postfix = "]")
+
 
                             val json = """
 {
@@ -582,7 +581,7 @@ class MyToolWindowFactory : ToolWindowFactory {
         "time_on_class_seconds": $timeOnClassSec,
         "class_line_count": $currentLines,
         "delta_lines": $deltaL,
-        "deletion_bursts": $deletionBurstsJson,
+        "deletion_bursts": ${deletionBursts.sum()},
         "ast_nodes": $nodesJson,
         "cs_value": $csValue,
         "snapshot_history_size": ${snapshotHistory.size}
