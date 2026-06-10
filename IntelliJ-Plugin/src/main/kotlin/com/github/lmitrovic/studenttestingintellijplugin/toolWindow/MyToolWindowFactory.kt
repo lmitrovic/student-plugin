@@ -267,43 +267,52 @@ class MyToolWindowFactory : ToolWindowFactory {
                         val snapshotHistory = mutableListOf<Set<String>>()
 
 // 1. DOCUMENT LISTENER — za keystroke brojanje i brisanje
-                        val editor = FileEditorManager.getInstance(project).selectedTextEditor
-                        val document = editor?.document
+                        com.intellij.openapi.editor.EditorFactory.getInstance()
+                            .addEditorFactoryListener(
+                                object : com.intellij.openapi.editor.event.EditorFactoryListener {
+                                    override fun editorCreated(
+                                        event: com.intellij.openapi.editor.event.EditorFactoryEvent
+                                    ) {
+                                        event.editor.document.addDocumentListener(
+                                            object : com.intellij.openapi.editor.event.DocumentListener {
+                                                override fun documentChanged(
+                                                    event: com.intellij.openapi.editor.event.DocumentEvent
+                                                ) {
+                                                    classLines = event.document.lineCount
+                                                    val added = event.newLength - event.oldLength
+                                                    if (added > 0) {
+                                                        keystrokeCount += added
+                                                        println("KR DEBUG: +$added chars, total=$keystrokeCount")
+                                                    }
+                                                }
 
-                        document?.addDocumentListener(
-                            object : com.intellij.openapi.editor.event.DocumentListener {
-                                override fun documentChanged(event: com.intellij.openapi.editor.event.DocumentEvent) {
-                                    classLines = event.document.lineCount
-                                    val added = event.newLength - event.oldLength
-                                    if (added > 0) {
-                                        keystrokeCount += added
-                                        println("KR DEBUG: +$added chars, total=$keystrokeCount")
-                                    }
-                                }
-
-                                override fun beforeDocumentChange(event: com.intellij.openapi.editor.event.DocumentEvent) {
-                                    val oldLength = event.oldLength
-                                    val newLength = event.newLength
-
-                                    if (oldLength > newLength && !inDeletionMode) {
-                                        val now = System.currentTimeMillis()
-                                        val deletedCount = oldLength - newLength
-
-                                        if (!inDeletionMode || (now - lastEventTime) > BURST_TIMEOUT_MS) {
-                                            if (inDeletionMode && currentBurstSize > 0 && currentBurstSize > 5) {
-                                                deletionBursts.add(currentBurstSize)
+                                                override fun beforeDocumentChange(
+                                                    event: com.intellij.openapi.editor.event.DocumentEvent
+                                                ) {
+                                                    val oldLength = event.oldLength
+                                                    val newLength = event.newLength
+                                                    if (oldLength > newLength) {
+                                                        val now = System.currentTimeMillis()
+                                                        val deletedCount = oldLength - newLength
+                                                        if (!inDeletionMode ||
+                                                            (now - lastEventTime) > BURST_TIMEOUT_MS) {
+                                                            if (inDeletionMode &&
+                                                                currentBurstSize > 5) {
+                                                                deletionBursts.add(currentBurstSize)
+                                                            }
+                                                            currentBurstSize = 0
+                                                            inDeletionMode = true
+                                                        }
+                                                        currentBurstSize += deletedCount
+                                                        lastEventTime = now
+                                                    }
+                                                }
                                             }
-                                            currentBurstSize = 0
-                                            inDeletionMode = true
-                                        }
-
-                                        currentBurstSize += deletedCount
-                                        lastEventTime = now
-                                        println("DB DEBUG: Cut/Bulk delete: $deletedCount chars")
+                                        )
                                     }
-                                }
-                            }
-                        )
+                                },
+                                project
+                            )
 
 // 2. COMMAND LISTENER — za backspace/delete brisanje
                         project.messageBus.connect().subscribe(
