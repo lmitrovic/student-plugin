@@ -30,10 +30,8 @@ import javax.swing.border.EmptyBorder
 import kotlin.properties.Delegates
 import raflms.trackingstub.api.TrackingStubService
 import raflms.trackingstub.config.ConfigFactory as TrackingConfigFactory
-import com.intellij.openapi.editor.event.EditorBackspaceListener
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.actionSystem.DataContext
-import com.intellij.openapi.editor.event.EditorKeyEvent
 import com.intellij.openapi.editor.event.EditorEventMulticaster
 import kotlin.text.RegexOption
 
@@ -288,65 +286,20 @@ class MyToolWindowFactory : ToolWindowFactory {
 
 // 2. EDITOR BACKSPACE LISTENER — za brisanje
                         project.messageBus.connect().subscribe(
-                            com.intellij.openapi.editor.event.EditorBackspaceListener.TOPIC,
-                            object : com.intellij.openapi.editor.event.EditorBackspaceListener {
-                                override fun beforeBackspace(editor: Editor, context: DataContext) {
-                                    val now = System.currentTimeMillis()
-                                    val selectionModel = editor.selectionModel
-                                    val caretModel = editor.caretModel
+                            com.intellij.openapi.command.CommandListener.TOPIC,
+                            object : com.intellij.openapi.command.CommandListener {
+                                override fun beforeCommandFinished(event: com.intellij.openapi.command.CommandEvent) {
+                                    val commandName = event.commandName ?: return
+                                    if (commandName.contains("BackSpace", ignoreCase = true) ||
+                                        commandName.contains("Delete", ignoreCase = true)) {
 
-                                    // Proverava da li je ovo novi burst (timeout)
-                                    if (!inDeletionMode || (now - lastEventTime) > BURST_TIMEOUT_MS) {
-                                        // Sačuvaj prethodni burst ako postoji
-                                        if (inDeletionMode && currentBurstSize > 0) {
-                                            if (currentBurstSize > 5) {
-                                                deletionBursts.add(currentBurstSize)
-                                                println("DB DEBUG: Burst saved: $currentBurstSize")
-                                            }
-                                        }
-                                        currentBurstSize = 0
-                                        inDeletionMode = true
-                                    }
-
-                                    // Racina koliko karaktera je obrisano
-                                    val deletedCount = if (selectionModel.hasSelection()) {
-                                        val selectedText = selectionModel.selectedText
-                                        selectedText?.length ?: 1
-                                    } else {
-                                        1  // Jedan karakter levo
-                                    }
-
-                                    currentBurstSize += deletedCount
-                                    lastEventTime = now
-                                    println("DB DEBUG: Deleted $deletedCount chars, burst size=$currentBurstSize")
-                                }
-
-                                override fun afterBackspace(editor: Editor, context: DataContext) {
-                                    // Opciono
-                                }
-                            }
-                        )
-
-// 3. EDITOR KEY LISTENER — za Delete taster (nije backspace)
-                        project.messageBus.connect().subscribe(
-                            com.intellij.openapi.editor.event.EditorEventMulticaster.EDITOR_KEY_TOPIC,
-                            object : com.intellij.openapi.editor.event.EditorKeyListener {
-                                override fun keyPressed(event: com.intellij.openapi.editor.event.EditorKeyEvent) {
-                                    val keyCode = event.keyCode
-                                    // Delete taster (ne backspace)
-                                    if (keyCode == java.awt.event.KeyEvent.VK_DELETE) {
-                                        val editor = event.editor
+                                        val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return
+                                        val now = System.currentTimeMillis()
                                         val selectionModel = editor.selectionModel
 
-                                        val now = System.currentTimeMillis()
-
-                                        // Proveri za novi burst
                                         if (!inDeletionMode || (now - lastEventTime) > BURST_TIMEOUT_MS) {
-                                            if (inDeletionMode && currentBurstSize > 0) {
-                                                if (currentBurstSize > 5) {
-                                                    deletionBursts.add(currentBurstSize)
-                                                    println("DB DEBUG: Burst saved (Delete): $currentBurstSize")
-                                                }
+                                            if (inDeletionMode && currentBurstSize > 0 && currentBurstSize > 5) {
+                                                deletionBursts.add(currentBurstSize)
                                             }
                                             currentBurstSize = 0
                                             inDeletionMode = true
@@ -360,11 +313,47 @@ class MyToolWindowFactory : ToolWindowFactory {
 
                                         currentBurstSize += deletedCount
                                         lastEventTime = now
-                                        println("DB DEBUG: Delete key deleted $deletedCount chars, burst size=$currentBurstSize")
+                                        println("DB DEBUG: Deleted $deletedCount chars, burst size=$currentBurstSize")
                                     }
                                 }
                             }
                         )
+
+// 3. EDITOR KEY LISTENER — za Delete taster (nije backspace)
+                        // Zamena za EDITOR_KEY_TOPIC / EditorKeyListener
+                        val keyDispatcher = java.awt.KeyEventDispatcher { keyEvent ->
+                            if (keyEvent.id == java.awt.event.KeyEvent.KEY_PRESSED &&
+                                keyEvent.keyCode == java.awt.event.KeyEvent.VK_DELETE) {
+
+                                val editor = FileEditorManager.getInstance(project).selectedTextEditor
+                                if (editor != null) {
+                                    val now = System.currentTimeMillis()
+                                    val selectionModel = editor.selectionModel
+
+                                    if (!inDeletionMode || (now - lastEventTime) > BURST_TIMEOUT_MS) {
+                                        if (inDeletionMode && currentBurstSize > 0 && currentBurstSize > 5) {
+                                            deletionBursts.add(currentBurstSize)
+                                        }
+                                        currentBurstSize = 0
+                                        inDeletionMode = true
+                                    }
+
+                                    val deletedCount = if (selectionModel.hasSelection()) {
+                                        selectionModel.selectedText?.length ?: 1
+                                    } else {
+                                        1
+                                    }
+
+                                    currentBurstSize += deletedCount
+                                    lastEventTime = now
+                                    println("DB DEBUG: Delete key deleted $deletedCount chars, burst=$currentBurstSize")
+                                }
+                            }
+                            false // ne konzumiraj event
+                        }
+
+                        java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager()
+                            .addKeyEventDispatcher(keyDispatcher)
 
 // 4. DOCUMENT LISTENER — za AST snapshot i linije koda
                         val editor = FileEditorManager.getInstance(project).selectedTextEditor
