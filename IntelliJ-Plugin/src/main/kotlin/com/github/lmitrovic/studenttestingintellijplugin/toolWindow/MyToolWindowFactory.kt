@@ -638,10 +638,7 @@ class MyToolWindowFactory : ToolWindowFactory {
 
                             val base = File(System.getProperty("user.home"), MyBundle.downloadFolder)
 
-                            val first = base.listFiles { obj: File? -> obj!!.isDirectory() }[0]
-                            //val second = first.listFiles { obj: File? -> obj!!.isDirectory() }[0]
-
-                            val assignmentSource = File(first.absolutePath)
+                            val assignmentSource = base
 
                             FileDocumentManager.getInstance().saveAllDocuments()
                             VirtualFileManager.getInstance().syncRefresh()
@@ -653,7 +650,7 @@ class MyToolWindowFactory : ToolWindowFactory {
 
                                 // obriši stare fajlove
                                 projectVf.children
-                                    //.filter { it.name != ".idea" && it.name != ".git" }
+                                    .filter { it.name != ".idea" && it.name != ".git" }
                                     .forEach { it.delete(this) }
 
                                 val sourceVf = LocalFileSystem.getInstance()
@@ -661,7 +658,7 @@ class MyToolWindowFactory : ToolWindowFactory {
 
                                 // kopiraj nove fajlove iz preuzetog projekta (bez .idea)
                                 sourceVf.children
-                                    //.filter { it.name != ".idea" && it.name != ".git" }
+                                    .filter { it.name != ".idea" && it.name != ".git" }
                                     .forEach { child ->
                                         VfsUtil.copy(this, child, projectVf)
                                     }
