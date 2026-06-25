@@ -835,7 +835,7 @@ class MyToolWindowFactory : ToolWindowFactory {
     "window_start_sec": ${tCurrentSec - 20},
     "window_end_sec": $tCurrentSec,
     "t_current_min": ${tCurrentSec / 60},
-    "t_total_min": 120,
+    "t_total_min": 180,
     "metrics": {
         "keystroke_count": $keystrokeCount,
         "compile_errors": $compileErrors,
