@@ -243,7 +243,260 @@ class MyToolWindowFactory : ToolWindowFactory {
                             "${studentsStudyProgramTF.text}-${studentsIndexNumberTF.text}-${studentsStartYearTF.text}"
                         val taskId =
                             "${subjectCB.selectedItem}-${testGroupCB.selectedItem}-${studentsTermCB.selectedItem}"
-                        //trackingService.startTracking(studentId, taskId)
+                        trackingService.startTracking(studentId, taskId)
+                        currentStudentId = studentId
+                        println("=== TRACKING STARTED: $studentId, $taskId ===")
+
+                        // ──────────────────────────────────────────────────────────────────────────
+// RAF TRACKING LISTENERS — sends events to activitytrackingapi via trackingstub
+// ──────────────────────────────────────────────────────────────────────────
+
+
+                        val lastCodeChangeTime = mutableMapOf<String, Long>()
+// 1. CODE CHANGE TRACKER
+                        com.intellij.openapi.editor.EditorFactory.getInstance()
+                            .addEditorFactoryListener(
+                                object : com.intellij.openapi.editor.event.EditorFactoryListener {
+                                    override fun editorCreated(event: com.intellij.openapi.editor.event.EditorFactoryEvent) {
+                                        val editor = event.editor
+                                        editor.document.addDocumentListener(
+                                            object : com.intellij.openapi.editor.event.DocumentListener {
+                                                override fun documentChanged(e: com.intellij.openapi.editor.event.DocumentEvent) {
+                                                    val file = com.intellij.openapi.fileEditor.FileDocumentManager
+                                                        .getInstance().getFile(editor.document)
+                                                    val charsAdded = e.newLength - e.oldLength
+                                                    val fileName = file?.name ?: "unknown"
+                                                    val now = System.currentTimeMillis()
+                                                    val last = lastCodeChangeTime[fileName] ?: 0L
+                                                    if (now - last >= 500) {
+                                                        lastCodeChangeTime[fileName] = now
+                                                        trackingService.logEvent(
+                                                            "CODE_CHANGE", studentId,
+                                                            mapOf(
+                                                                "file" to fileName,
+                                                                "line" to editor.caretModel.logicalPosition.line,
+                                                                "charsAdded" to charsAdded,
+                                                                "isDelete" to (charsAdded < 0)
+                                                            )
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        )
+                                    }
+                                },
+                                project
+                            )
+
+// 2. COMPILATION TRACKER
+                        project.messageBus.connect().subscribe(
+                            com.intellij.openapi.actionSystem.ex.AnActionListener.TOPIC,
+                            object : com.intellij.openapi.actionSystem.ex.AnActionListener {
+                                override fun beforeActionPerformed(
+                                    action: com.intellij.openapi.actionSystem.AnAction,
+                                    event: com.intellij.openapi.actionSystem.AnActionEvent
+                                ) {
+                                    val actionId = com.intellij.openapi.actionSystem.ActionManager.getInstance().getId(action)
+                                    if (actionId != null && isCompilationAction(actionId)) {
+                                        trackingService.logEvent(
+                                            "COMPILATION_STARTED", studentId,
+                                            mapOf("actionId" to actionId)
+                                        )
+                                    }
+                                }
+
+                                override fun afterActionPerformed(
+                                    action: com.intellij.openapi.actionSystem.AnAction,
+                                    event: com.intellij.openapi.actionSystem.AnActionEvent,
+                                    result: com.intellij.openapi.actionSystem.AnActionResult
+                                ) {
+                                    val actionId = com.intellij.openapi.actionSystem.ActionManager.getInstance().getId(action)
+                                    if (actionId != null && isCompilationAction(actionId)) {
+                                        trackingService.logEvent(
+                                            "COMPILATION_FINISHED", studentId,
+                                            mapOf(
+                                                "actionId" to actionId,
+                                                "success" to result.isPerformed
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        )
+
+// 3. FOCUS TRACKER
+                        val ideFrame = com.intellij.openapi.wm.WindowManager.getInstance().getFrame(project)
+                        ideFrame?.addWindowFocusListener(object : java.awt.event.WindowFocusListener {
+                            override fun windowGainedFocus(e: java.awt.event.WindowEvent) {
+                                trackingService.logEvent("FOCUS_GAINED", studentId)
+                            }
+                            override fun windowLostFocus(e: java.awt.event.WindowEvent) {
+                                trackingService.logEvent("FOCUS_LOST", studentId)
+                            }
+                        })
+
+                        // 4. INACTIVITY TRACKER
+                        val inactivityThresholdMs = 60_000L // 60 seconds
+                        var lastActivityTime = System.currentTimeMillis()
+                        var inactivityReported = false
+                        var currentFileForInactivity = ""
+
+// Update activity on any code change
+                        val inactivityTimer = javax.swing.Timer(10_000) {
+                            val now = System.currentTimeMillis()
+                            val inactiveDuration = now - lastActivityTime
+                            if (inactiveDuration >= inactivityThresholdMs && !inactivityReported) {
+                                inactivityReported = true
+                                trackingService.logEvent(
+                                    "INACTIVITY", studentId,
+                                    mapOf(
+                                        "durationSeconds" to inactiveDuration / 1000,
+                                        "file" to currentFileForInactivity
+                                    )
+                                )
+                            }
+                        }
+                        inactivityTimer.start()
+
+// Reset inactivity on code change — subscribe to document changes
+                        com.intellij.openapi.editor.EditorFactory.getInstance()
+                            .addEditorFactoryListener(
+                                object : com.intellij.openapi.editor.event.EditorFactoryListener {
+                                    override fun editorCreated(event: com.intellij.openapi.editor.event.EditorFactoryEvent) {
+                                        event.editor.document.addDocumentListener(
+                                            object : com.intellij.openapi.editor.event.DocumentListener {
+                                                override fun documentChanged(e: com.intellij.openapi.editor.event.DocumentEvent) {
+                                                    lastActivityTime = System.currentTimeMillis()
+                                                    inactivityReported = false
+                                                    val file = com.intellij.openapi.fileEditor.FileDocumentManager
+                                                        .getInstance().getFile(event.editor.document)
+                                                    currentFileForInactivity = file?.name ?: "unknown"
+                                                }
+                                            }
+                                        )
+                                    }
+                                },
+                                project
+                            )
+
+// 5. FILE SWITCH TRACKER
+                        var currentOpenFile = ""
+                        var fileOpenedAt = System.currentTimeMillis()
+
+                        project.messageBus.connect().subscribe(
+                            com.intellij.openapi.fileEditor.FileEditorManagerListener.FILE_EDITOR_MANAGER,
+                            object : com.intellij.openapi.fileEditor.FileEditorManagerListener {
+                                override fun selectionChanged(event: com.intellij.openapi.fileEditor.FileEditorManagerEvent) {
+                                    val now = System.currentTimeMillis()
+                                    val newFile = event.newFile?.name ?: return
+                                    val oldFile = event.oldFile?.name ?: ""
+
+                                    if (oldFile.isNotEmpty() && newFile != oldFile) {
+                                        val timeSpentMs = now - fileOpenedAt
+                                        trackingService.logEvent(
+                                            "FILE_SWITCH", studentId,
+                                            mapOf(
+                                                "fromFile" to oldFile,
+                                                "toFile" to newFile,
+                                                "timeSpentMs" to timeSpentMs
+                                            )
+                                        )
+                                    }
+
+                                    currentOpenFile = newFile
+                                    fileOpenedAt = now
+
+                                    // Reset inactivity on file switch too
+                                    lastActivityTime = now
+                                    inactivityReported = false
+                                    currentFileForInactivity = newFile
+                                }
+                            }
+                        )
+
+                        // 6. ERROR DETECTED TRACKER
+                        val lastErrorTime = mutableMapOf<String, Long>()
+                        val errorThrottleMs = 5_000L // don't repeat same error within 5 seconds
+
+                        project.messageBus.connect().subscribe(
+                            com.intellij.codeInsight.daemon.DaemonCodeAnalyzer.DAEMON_EVENT_TOPIC,
+                            object : com.intellij.codeInsight.daemon.DaemonCodeAnalyzer.DaemonListener {
+                                override fun daemonFinished() {
+                                    ApplicationManager.getApplication().invokeLater {
+                                        val currentEditor = FileEditorManager.getInstance(project)
+                                            .selectedTextEditor ?: return@invokeLater
+
+                                        val file = FileDocumentManager.getInstance()
+                                            .getFile(currentEditor.document)?.name ?: "unknown"
+
+                                        val highlights = com.intellij.codeInsight.daemon.impl
+                                            .DaemonCodeAnalyzerImpl.getHighlights(
+                                                currentEditor.document,
+                                                com.intellij.lang.annotation.HighlightSeverity.ERROR,
+                                                project
+                                            )
+
+                                        highlights.forEach { highlight ->
+                                            val errorMessage = highlight.description ?: return@forEach
+                                            val throttleKey = "$file:$errorMessage"
+                                            val now = System.currentTimeMillis()
+                                            val last = lastErrorTime[throttleKey] ?: 0L
+
+                                            if (now - last >= errorThrottleMs) {
+                                                lastErrorTime[throttleKey] = now
+                                                trackingService.logEvent(
+                                                    "ERROR_DETECTED", studentId,
+                                                    mapOf(
+                                                        "file" to file,
+                                                        "errorMessage" to errorMessage,
+                                                        "line" to (highlight.actualStartOffset).toDouble()
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        )
+
+// 7. TEST EXECUTION TRACKER
+                        project.messageBus.connect().subscribe(
+                            com.intellij.execution.ExecutionManager.EXECUTION_TOPIC,
+                            object : com.intellij.execution.ExecutionListener {
+                                override fun processStarted(
+                                    executorId: String,
+                                    env: com.intellij.execution.runners.ExecutionEnvironment,
+                                    handler: com.intellij.execution.process.ProcessHandler
+                                ) {
+                                    trackingService.logEvent(
+                                        "TEST_EXECUTION_STARTED", studentId,
+                                        mapOf(
+                                            "executorId" to executorId,
+                                            "configName" to env.runProfile.name
+                                        )
+                                    )
+                                }
+
+                                override fun processTerminated(
+                                    executorId: String,
+                                    env: com.intellij.execution.runners.ExecutionEnvironment,
+                                    handler: com.intellij.execution.process.ProcessHandler,
+                                    exitCode: Int
+                                ) {
+                                    trackingService.logEvent(
+                                        "TEST_EXECUTION_FINISHED", studentId,
+                                        mapOf(
+                                            "executorId" to executorId,
+                                            "configName" to env.runProfile.name,
+                                            "exitCode" to exitCode,
+                                            "success" to (exitCode == 0)
+                                        )
+                                    )
+                                }
+                            }
+                        )
+
+                        println("=== RAF TRACKING LISTENERS STARTED for: $studentId ===")
 
                         // ******************** ZARKO JE OVO DODAO ZA LISTENERE ZA ISPIT
 // ──────────────────────────────────────────────────────────────────────────
@@ -582,7 +835,7 @@ class MyToolWindowFactory : ToolWindowFactory {
     "window_start_sec": ${tCurrentSec - 20},
     "window_end_sec": $tCurrentSec,
     "t_current_min": ${tCurrentSec / 60},
-    "t_total_min": 120,
+    "t_total_min": 180,
     "metrics": {
         "keystroke_count": $keystrokeCount,
         "compile_errors": $compileErrors,
@@ -713,6 +966,7 @@ class MyToolWindowFactory : ToolWindowFactory {
         commitButton.maximumSize = Dimension(100, 30)
 
         commitButton.addActionListener {
+            trackingService.logEvent("SUBMISSION_ATTEMPT", currentStudentId, mapOf("type" to "commit"))
             val currentProject = ProjectManager.getInstance().openProjects[0]
             FileDocumentManager.getInstance().saveAllDocuments()
 
@@ -744,6 +998,7 @@ class MyToolWindowFactory : ToolWindowFactory {
             )
 
             if (confirmationDialog == JOptionPane.YES_OPTION) {
+                trackingService.logEvent("SUBMISSION_ATTEMPT", currentStudentId, mapOf("type" to "final"))
 
                 val currentProject = ProjectManager.getInstance().openProjects[0]
                 FileDocumentManager.getInstance().saveAllDocuments()
@@ -754,8 +1009,10 @@ class MyToolWindowFactory : ToolWindowFactory {
                     studentService.setProjectRoot(currentProject.basePath)
                     val isPushSuccess = studentService.submitAssignment(true)
 
+                    trackingService.stopTracking(currentStudentId)
+
                     if (isPushSuccess) {
-                        //trackingService.stopTracking(studentId)
+
                         finalSubmissionButton.isEnabled = false
                         //showSuccessPopup()
                         JOptionPane.showMessageDialog(
@@ -845,6 +1102,17 @@ class MyToolWindowFactory : ToolWindowFactory {
         fieldPanel.add(field, BorderLayout.CENTER)
 
         return fieldPanel
+    }
+
+    private fun isCompilationAction(actionId: String): Boolean {
+        return actionId.contains("Compile") ||
+                actionId.contains("Build") ||
+                actionId == "CompileDirty" ||
+                actionId == "BuildProject" ||
+                actionId == "RebuildProject" ||
+                actionId == "CompileProject" ||
+                actionId == "Run" ||
+                actionId == "Debug"
     }
 
     override fun shouldBeAvailable(project: Project) = true
