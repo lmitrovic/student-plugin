@@ -4,17 +4,15 @@ import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.notification.*
 import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.startup.StartupActivity
+import com.intellij.openapi.startup.ProjectActivity
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.options.ShowSettingsUtil
 import java.net.URI
 
-class PluginStartupActivity : StartupActivity {
+class PluginStartupActivity : ProjectActivity {
 
-    override fun runActivity(project: Project) {
-        ApplicationManager.getApplication().executeOnPooledThread {
-            checkPluginUpdate(project)
-        }
+    override suspend fun execute(project: Project) {
+        checkPluginUpdate(project)
     }
 
     private fun checkPluginUpdate(project: Project) {
