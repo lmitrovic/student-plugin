@@ -1,5 +1,4 @@
-package com.github.lmitrovic.studenttestingintellijplugin.toolWindow
-
+package com.github.lmitrovic.studenttestingintellijplugin.startup
 
 import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.notification.*
@@ -8,7 +7,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.StartupActivity
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.options.ShowSettingsUtil
-import java.net.URL
+import java.net.URI
 
 class PluginStartupActivity : StartupActivity {
 
@@ -23,17 +22,10 @@ class PluginStartupActivity : StartupActivity {
             val pluginId = PluginId.getId("com.github.lmitrovic.studenttestingintellijplugin")
             val currentVersion = PluginManagerCore.getPlugin(pluginId)?.version ?: "0.0.0"
 
-            val xmlContent = URL("http://157.180.37.247/updatePluginsStudent.xml").readText()
+            val xmlContent = URI("http://157.180.37.247/updatePluginsStudent.xml").toURL().readText()
 
-            // REGEX objašnjenje:
-            // version=" -> traži bukvalan tekst
-            // (.*?)     -> hvata sve unutar (to je naša verzija)
-            // "         -> do sledećeg navodnika
             val regex = "version=\"(.*?)\"".toRegex()
-
-            // Uzimamo SVA pojavljivanja i biramo POSLEDNJE (najnovija verzija)
-            val matches = regex.findAll(xmlContent)
-            val latestVersion = matches.lastOrNull()?.groupValues?.get(1) ?: ""
+            val latestVersion = regex.findAll(xmlContent).lastOrNull()?.groupValues?.get(1) ?: ""
 
             if (latestVersion.isNotEmpty() && latestVersion != currentVersion) {
                 ApplicationManager.getApplication().invokeLater {

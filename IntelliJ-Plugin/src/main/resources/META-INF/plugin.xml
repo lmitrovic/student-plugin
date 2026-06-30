@@ -8,6 +8,7 @@
 
 
     <depends>com.intellij.modules.platform</depends>
+    <depends>org.jetbrains.idea.maven</depends>
 
     <resource-bundle>messages.MyBundle</resource-bundle>
 
@@ -18,7 +19,7 @@
                            displayType="BALLOON"
                            isLogByDefault="true"/>
 
-        <postStartupActivity implementation="com.github.lmitrovic.studenttestingintellijplugin.toolWindow.PluginStartupActivity"/>
+        <postStartupActivity implementation="com.github.lmitrovic.studenttestingintellijplugin.startup.PluginStartupActivity"/>
     </extensions>
 
     <applicationListeners>
