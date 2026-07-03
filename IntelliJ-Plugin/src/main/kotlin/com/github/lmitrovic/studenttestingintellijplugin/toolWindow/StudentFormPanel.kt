@@ -270,6 +270,20 @@ class StudentFormPanel(
 
             if (isPushSuccess) {
                 finalSubmissionButton.isEnabled = false
+
+                val studentId = "${studentsStudyProgramTF.text}-${studentsIndexNumberTF.text}-${studentsStartYearTF.text}"
+                val url = java.net.URL("http://157.180.37.247/api/student/finished")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.connectTimeout = 5000
+                conn.readTimeout = 5000
+                conn.doOutput = true
+                val json = """{"student_id": "$studentId"}"""
+                conn.outputStream.use { it.write(json.toByteArray()) }
+                println("Student $studentId predao rad, response: ${conn.responseCode}")
+                conn.disconnect()
+
                 JOptionPane.showMessageDialog(null, "Uspešno ste predali rad!", "Uspešno", JOptionPane.INFORMATION_MESSAGE)
             } else {
                 println("Failed to push changes to new branch.")
