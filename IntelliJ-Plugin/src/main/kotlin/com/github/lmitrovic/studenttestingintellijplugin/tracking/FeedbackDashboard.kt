@@ -62,9 +62,11 @@ class FeedbackDashboard(
                             try {
                                 classLines = event.document.lineCount
                                 val added = event.newLength - event.oldLength
-                                if (added > 0) {
+                                if (added > 0 && added <= 100) {
                                     keystrokeCount += added
                                     println("KR DEBUG: +$added chars, total=$keystrokeCount")
+                                } else if (added > 100) {
+                                    println("KR DEBUG: IGNORISANA velika promena ($added chars) - Paste/Format")
                                 }
                             } catch (e: Throwable) {
                                 println("FeedbackDashboard: documentChanged failed: ${e.message}")
