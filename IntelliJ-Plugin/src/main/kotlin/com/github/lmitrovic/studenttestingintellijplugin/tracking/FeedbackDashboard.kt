@@ -203,18 +203,21 @@ class FeedbackDashboard(
                                 .selectedTextEditor ?: return@invokeLater
 
                             val highlights = DaemonCodeAnalyzerImpl.getHighlights(
-                                    currentEditor.document,
-                                    HighlightSeverity.ERROR,
-                                    project
-                                )
+                                currentEditor.document,
+                                HighlightSeverity.ERROR,
+                                project
+                            )
 
-                            compileErrors += highlights.count { h ->
+
+                            compileErrors = highlights.count { h ->
                                 val desc = h.description ?: ""
-                                !desc.contains("runtime", ignoreCase = true) && !desc.contains("exception", ignoreCase = true)
+                                !desc.contains("runtime", ignoreCase = true) &&
+                                        !desc.contains("exception", ignoreCase = true)
                             }
-                            runtimeErrors += highlights.count { h ->
+                            runtimeErrors = highlights.count { h ->
                                 val desc = h.description ?: ""
-                                desc.contains("runtime", ignoreCase = true) || desc.contains("exception", ignoreCase = true)
+                                desc.contains("runtime", ignoreCase = true) ||
+                                        desc.contains("exception", ignoreCase = true)
                             }
                             println("ER DEBUG: compile=$compileErrors, runtime=$runtimeErrors")
                         } catch (e: Throwable) {
