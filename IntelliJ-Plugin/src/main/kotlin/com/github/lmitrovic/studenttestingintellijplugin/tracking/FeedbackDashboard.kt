@@ -29,6 +29,8 @@ class FeedbackDashboard(
     private val studentId: String
 ) {
 
+    private val apiClient = StudentApiClient()
+
     private var keystrokeCount = 0
     private var deletionBursts = mutableListOf<Int>()
     private var currentBurstSize = 0
@@ -51,6 +53,14 @@ class FeedbackDashboard(
         try { registerCompileErrorListener() } catch (e: Throwable) { println("FeedbackDashboard: registerCompileErrorListener failed: ${e.message}") }
         try { startFeedbackTimer() } catch (e: Throwable) { println("FeedbackDashboard: startFeedbackTimer failed: ${e.message}") }
         println("Feedback Dashboard listeneri pokrenuti za: $studentId")
+    }
+
+    fun finish() {
+        try {
+            apiClient.notifyFinished(studentId)
+        } catch (e: Throwable) {
+            println("FeedbackDashboard: notifyFinished failed: ${e.message}")
+        }
     }
 
     private fun registerDocumentListener() {
