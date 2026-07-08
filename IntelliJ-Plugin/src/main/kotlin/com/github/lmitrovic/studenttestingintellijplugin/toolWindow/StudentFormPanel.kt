@@ -32,15 +32,15 @@ class StudentFormPanel(
 
     val root: JPanel
 
-    private val studentsFirstNameTF    = JTextField()
-    private val studentsLastNameTF     = JTextField()
+    private val studentsFirstNameTF = JTextField()
+    private val studentsLastNameTF = JTextField()
     private val studentsStudyProgramTF = JBTextField().apply { emptyText.text = "SI, RI ili RN" }
-    private val studentsIndexNumberTF  = JTextField()
-    private val studentsStartYearTF    = JTextField()
-    private val studentsTaskGroupTF    = JTextField()
-    private val classroomNameTF        = JTextField()
-    private val studentsTermCB         = JComboBox<Any>()
-    private val testGroupCB            = JComboBox<Any>()
+    private val studentsIndexNumberTF = JTextField()
+    private val studentsStartYearTF = JTextField()
+    private val studentsTaskGroupTF = JTextField()
+    private val classroomNameTF = JTextField()
+    private val studentsTermCB = JComboBox<Any>()
+    private val testGroupCB = JComboBox<Any>()
     private val subjectCB: JComboBox<Any>
 
     private val signInButton = JButton("Počni").apply {
@@ -142,7 +142,7 @@ class StudentFormPanel(
         val labelW = JBUI.scale(120)
         val label = JLabel(labelText).apply {
             preferredSize = Dimension(labelW, preferredSize.height)
-            minimumSize  = Dimension(labelW, minimumSize.height)
+            minimumSize = Dimension(labelW, minimumSize.height)
         }
         return JPanel(BorderLayout(JBUI.scale(6), 0)).apply {
             maximumSize = Dimension(Int.MAX_VALUE, component.preferredSize.height + JBUI.scale(2))
@@ -195,14 +195,27 @@ class StudentFormPanel(
 
             ApplicationManager.getApplication().invokeLater {
                 if (success) {
-                    val studentId = "${studentsStudyProgramTF.text}-${studentsIndexNumberTF.text}-${studentsStartYearTF.text}"
+                    val studentId =
+                        "${studentsStudyProgramTF.text}-${studentsIndexNumberTF.text}-${studentsStartYearTF.text}"
                     val taskId = "${subjectCB.selectedItem}-${testGroupCB.selectedItem}-${studentsTermCB.selectedItem}"
                     currentStudentId = studentId
 
-                    try { trackingService.startTracking(studentId, taskId) } catch (e: Throwable) { println("=== TRACKING startTracking FAILED: ${e.message} ===") }
+                    try {
+                        trackingService.startTracking(studentId, taskId)
+                    } catch (e: Throwable) {
+                        println("=== TRACKING startTracking FAILED: ${e.message} ===")
+                    }
                     println("=== TRACKING STARTED: $studentId, $taskId ===")
-                    try { ActivityTracker(project, trackingService, studentId).start() } catch (e: Throwable) { println("=== ActivityTracker FAILED: ${e.message} ===") }
-                    try { FeedbackDashboard(project, studentId).start() } catch (e: Throwable) { println("=== FeedbackDashboard FAILED: ${e.message} ===") }
+                    try {
+                        ActivityTracker(project, trackingService, studentId).start()
+                    } catch (e: Throwable) {
+                        println("=== ActivityTracker FAILED: ${e.message} ===")
+                    }
+                    try {
+                        FeedbackDashboard(project, studentId).start()
+                    } catch (e: Throwable) {
+                        println("=== FeedbackDashboard FAILED: ${e.message} ===")
+                    }
 
                     AssignmentLoader(project).copyAndLoad()
                     disableFormFields()
@@ -216,34 +229,48 @@ class StudentFormPanel(
                         LocalFileSystem.getInstance().refreshAndFindFileByPath(project.basePath!!)?.refresh(false, true)
                     }
                 } else {
-                    JOptionPane.showMessageDialog(null, "Nije uspelo preuzimanje zadatka.", "Greška", JOptionPane.ERROR_MESSAGE)
+                    JOptionPane.showMessageDialog(
+                        null,
+                        "Nije uspelo preuzimanje zadatka.",
+                        "Greška",
+                        JOptionPane.ERROR_MESSAGE
+                    )
                 }
             }
         }
     }
 
     private fun disableFormFields() {
-        studentsFirstNameTF.isEnabled    = false
-        studentsLastNameTF.isEnabled     = false
+        studentsFirstNameTF.isEnabled = false
+        studentsLastNameTF.isEnabled = false
         studentsStudyProgramTF.isEnabled = false
-        studentsIndexNumberTF.isEnabled  = false
-        studentsStartYearTF.isEnabled    = false
-        studentsTaskGroupTF.isEnabled    = false
-        classroomNameTF.isEnabled        = false
-        subjectCB.isEnabled              = false
-        testGroupCB.isEnabled            = false
-        studentsTermCB.isEnabled         = false
+        studentsIndexNumberTF.isEnabled = false
+        studentsStartYearTF.isEnabled = false
+        studentsTaskGroupTF.isEnabled = false
+        classroomNameTF.isEnabled = false
+        subjectCB.isEnabled = false
+        testGroupCB.isEnabled = false
+        studentsTermCB.isEnabled = false
     }
 
     private fun onCommitClicked() {
-        try { trackingService.logEvent("SUBMISSION_ATTEMPT", currentStudentId, mapOf("type" to "commit")) } catch (e: Throwable) { println("Tracking logEvent failed: ${e.message}") }
+        try {
+            trackingService.logEvent("SUBMISSION_ATTEMPT", currentStudentId, mapOf("type" to "commit"))
+        } catch (e: Throwable) {
+            println("Tracking logEvent failed: ${e.message}")
+        }
         val currentProject = ProjectManager.getInstance().openProjects[0]
         FileDocumentManager.getInstance().saveAllDocuments()
 
         ApplicationManager.getApplication().executeOnPooledThread {
             studentService.setProjectRoot(currentProject.basePath)
             if (studentService.submitAssignment(false)) {
-                JOptionPane.showMessageDialog(null, "Uspešno ste predali rad!", "Uspešno", JOptionPane.INFORMATION_MESSAGE)
+                JOptionPane.showMessageDialog(
+                    null,
+                    "Uspešno ste predali rad!",
+                    "Uspešno",
+                    JOptionPane.INFORMATION_MESSAGE
+                )
             }
         }
     }
@@ -259,35 +286,48 @@ class StudentFormPanel(
 
         if (!confirmed) return
 
-        try { trackingService.logEvent("SUBMISSION_ATTEMPT", currentStudentId, mapOf("type" to "final")) } catch (e: Throwable) { println("Tracking logEvent failed: ${e.message}") }
+        try {
+            trackingService.logEvent("SUBMISSION_ATTEMPT", currentStudentId, mapOf("type" to "final"))
+        } catch (e: Throwable) {
+            println("Tracking logEvent failed: ${e.message}")
+        }
         val currentProject = ProjectManager.getInstance().openProjects[0]
         FileDocumentManager.getInstance().saveAllDocuments()
 
         ApplicationManager.getApplication().executeOnPooledThread {
             studentService.setProjectRoot(currentProject.basePath)
             val isPushSuccess = studentService.submitAssignment(true)
-            try { trackingService.stopTracking(currentStudentId) } catch (e: Throwable) { println("Tracking stopTracking failed: ${e.message}") }
+            try {
+                trackingService.stopTracking(currentStudentId)
+            } catch (e: Throwable) {
+                println("Tracking stopTracking failed: ${e.message}")
+            }
 
             if (isPushSuccess) {
                 finalSubmissionButton.isEnabled = false
 
-                val studentId = "${studentsStudyProgramTF.text}-${studentsIndexNumberTF.text}-${studentsStartYearTF.text}"
-                val url = java.net.URL("http://157.180.37.247/api/student/finished")
-                val conn = url.openConnection() as java.net.HttpURLConnection
-                conn.requestMethod = "POST"
-                conn.setRequestProperty("Content-Type", "application/json")
-                conn.connectTimeout = 5000
-                conn.readTimeout = 5000
-                conn.doOutput = true
-                val json = """{"student_id": "$studentId"}"""
-                conn.outputStream.use { it.write(json.toByteArray()) }
-                println("Student $studentId predao rad, response: ${conn.responseCode}")
-                conn.disconnect()
+                val studentId =
+                    "${studentsStudyProgramTF.text}-${studentsIndexNumberTF.text}-${studentsStartYearTF.text}"
+                try {
+                    FeedbackDashboard(project, studentId).finish()
+                } catch (e: Throwable) {
+                    println("=== FeedbackDashboard finish FAILED: ${e.message} ===")
+                }
 
-                JOptionPane.showMessageDialog(null, "Uspešno ste predali rad!", "Uspešno", JOptionPane.INFORMATION_MESSAGE)
+                JOptionPane.showMessageDialog(
+                    null,
+                    "Uspešno ste predali rad!",
+                    "Uspešno",
+                    JOptionPane.INFORMATION_MESSAGE
+                )
             } else {
                 println("Failed to push changes to new branch.")
-                JOptionPane.showMessageDialog(null, "Greška tokom predaje rada!", "Greška", JOptionPane.INFORMATION_MESSAGE)
+                JOptionPane.showMessageDialog(
+                    null,
+                    "Greška tokom predaje rada!",
+                    "Greška",
+                    JOptionPane.INFORMATION_MESSAGE
+                )
             }
         }
     }
