@@ -190,6 +190,7 @@ class StudentFormPanel(
                 subjectCB.selectedItem?.toString(),
                 testGroupCB.selectedItem?.toString(),
                 studentsTermCB.selectedItem?.toString(),
+                classroomNameTF.text,
                 downloadPath.toString()
             )
 
