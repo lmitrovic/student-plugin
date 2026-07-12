@@ -18,13 +18,21 @@ import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.editor.event.EditorFactoryEvent
 import com.intellij.openapi.editor.event.EditorFactoryListener
+import com.intellij.codeInsight.lookup.Lookup
+import com.intellij.codeInsight.lookup.LookupEvent
+import com.intellij.codeInsight.lookup.LookupListener
+import com.intellij.codeInsight.lookup.LookupManagerListener
+import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.WindowManager
 import raflms.trackingstub.api.TrackingStubService
+import java.awt.Toolkit
+import java.awt.datatransfer.DataFlavor
 import java.awt.event.WindowEvent
 import java.awt.event.WindowFocusListener
 import javax.swing.Timer
@@ -42,6 +50,10 @@ class ActivityTracker(
         try { registerInactivityTracker() } catch (e: Throwable) { println("ActivityTracker: registerInactivityTracker failed: ${e.message}") }
         try { registerFileSwitchTracker() } catch (e: Throwable) { println("ActivityTracker: registerFileSwitchTracker failed: ${e.message}") }
         try { registerErrorTracker() } catch (e: Throwable) { println("ActivityTracker: registerErrorTracker failed: ${e.message}") }
+        try { registerFileOpenCloseTracker() } catch (e: Throwable) { println("ActivityTracker: registerFileOpenCloseTracker failed: ${e.message}") }
+        try { registerTextChangeAggTracker() } catch (e: Throwable) { println("ActivityTracker: registerTextChangeAggTracker failed: ${e.message}") }
+        try { registerEditorActionTracker() } catch (e: Throwable) { println("ActivityTracker: registerEditorActionTracker failed: ${e.message}") }
+        try { registerAutocompleteTracker() } catch (e: Throwable) { println("ActivityTracker: registerAutocompleteTracker failed: ${e.message}") }
         try { registerTestExecutionTracker() } catch (e: Throwable) { println("ActivityTracker: registerTestExecutionTracker failed: ${e.message}") }
         println("=== RAF TRACKING LISTENERS STARTED for: $studentId ===")
     }
@@ -90,7 +102,7 @@ class ActivityTracker(
     }
 
     private fun registerCompilationTracker() {
-        project.messageBus.connect().subscribe(
+        ApplicationManager.getApplication().messageBus.connect().subscribe(
             AnActionListener.TOPIC,
             object : AnActionListener {
                 override fun beforeActionPerformed(
@@ -271,6 +283,191 @@ class ActivityTracker(
         )
     }
 
+    private fun registerFileOpenCloseTracker() {
+        val fileOpenTimes = mutableMapOf<String, Long>()
+
+        project.messageBus.connect().subscribe(
+            FileEditorManagerListener.FILE_EDITOR_MANAGER,
+            object : FileEditorManagerListener {
+                override fun fileOpened(source: FileEditorManager, file: VirtualFile) {
+                    fileOpenTimes[file.path] = System.currentTimeMillis()
+                    safeLog {
+                        trackingService.logEvent(
+                            "FILE_OPENED", studentId,
+                            mapOf("filePath" to file.path, "fileType" to (file.extension ?: "unknown"))
+                        )
+                    }
+                }
+
+                override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
+                    val openedAt = fileOpenTimes.remove(file.path) ?: return
+                    val timeOpenSeconds = (System.currentTimeMillis() - openedAt) / 1000
+                    safeLog {
+                        trackingService.logEvent(
+                            "FILE_CLOSED", studentId,
+                            mapOf("filePath" to file.path, "timeOpenSeconds" to timeOpenSeconds)
+                        )
+                    }
+                }
+            }
+        )
+    }
+
+    private fun registerTextChangeAggTracker() {
+        data class FileStats(
+            var linesAdded: Int = 0,
+            var linesDeleted: Int = 0,
+            var charsAdded: Int = 0,
+            var charsDeleted: Int = 0
+        )
+
+        val pending = mutableMapOf<String, FileStats>()
+
+        val flushTimer = Timer(7_000) {
+            try {
+                val snapshot = pending.toMap()
+                pending.clear()
+                snapshot.forEach { (filePath, stats) ->
+                    if (stats.charsAdded > 0 || stats.charsDeleted > 0 || stats.linesAdded > 0 || stats.linesDeleted > 0) {
+                        safeLog {
+                            trackingService.logEvent(
+                                "TEXT_CHANGED_AGG", studentId,
+                                mapOf(
+                                    "filePath" to filePath,
+                                    "linesAdded" to stats.linesAdded,
+                                    "linesDeleted" to stats.linesDeleted,
+                                    "charsAdded" to stats.charsAdded,
+                                    "charsDeleted" to stats.charsDeleted
+                                )
+                            )
+                        }
+                    }
+                }
+            } catch (e: Throwable) {
+                println("ActivityTracker: TEXT_CHANGED_AGG flush failed: ${e.message}")
+            }
+        }
+        flushTimer.start()
+
+        EditorFactory.getInstance().addEditorFactoryListener(
+            object : EditorFactoryListener {
+                override fun editorCreated(event: EditorFactoryEvent) {
+                    val editor = event.editor
+                    editor.document.addDocumentListener(object : DocumentListener {
+                        override fun documentChanged(e: DocumentEvent) {
+                            try {
+                                val file = FileDocumentManager.getInstance().getFile(editor.document)
+                                val filePath = file?.path ?: "unknown"
+                                val stats = pending.getOrPut(filePath) { FileStats() }
+                                val oldText = e.oldFragment.toString()
+                                val newText = e.newFragment.toString()
+                                stats.charsAdded += maxOf(0, newText.length - oldText.length)
+                                stats.charsDeleted += maxOf(0, oldText.length - newText.length)
+                                stats.linesAdded += newText.count { it == '\n' }
+                                stats.linesDeleted += oldText.count { it == '\n' }
+                            } catch (e: Throwable) {
+                                println("ActivityTracker: TEXT_CHANGED_AGG documentChanged failed: ${e.message}")
+                            }
+                        }
+                    })
+                }
+            },
+            project
+        )
+    }
+
+    private fun registerEditorActionTracker() {
+        var consecutiveUndos = 0
+        var lastActionId = ""
+        var pendingCopyLength = 0
+        var pendingPasteLength = 0
+
+        ApplicationManager.getApplication().messageBus.connect().subscribe(
+            AnActionListener.TOPIC,
+            object : AnActionListener {
+                override fun beforeActionPerformed(action: AnAction, event: AnActionEvent) {
+                    try {
+                        val actionId = ActionManager.getInstance().getId(action) ?: return
+                        val editor = event.getData(CommonDataKeys.EDITOR) ?: return
+                        when (actionId) {
+                            "\$Copy" -> pendingCopyLength = editor.selectionModel.selectedText?.length ?: 0
+                            "\$Paste" -> pendingPasteLength = try {
+                                (Toolkit.getDefaultToolkit().systemClipboard
+                                    .getData(DataFlavor.stringFlavor) as? String)?.length ?: 0
+                            } catch (_: Exception) { 0 }
+                        }
+                    } catch (e: Throwable) {
+                        println("ActivityTracker: editorAction beforeActionPerformed failed: ${e.message}")
+                    }
+                }
+
+                override fun afterActionPerformed(action: AnAction, event: AnActionEvent, result: AnActionResult) {
+                    if (!result.isPerformed) return
+                    try {
+                        val actionId = ActionManager.getInstance().getId(action) ?: return
+                        val editor = event.getData(CommonDataKeys.EDITOR)
+                        val file = editor?.let { FileDocumentManager.getInstance().getFile(it.document) }
+                        val filePath = file?.path ?: "unknown"
+
+                        when {
+                            actionId == "\$Copy" -> safeLog {
+                                trackingService.logEvent("COPY_ACTION", studentId, mapOf("filePath" to filePath, "length" to pendingCopyLength))
+                            }
+                            actionId == "\$Paste" -> safeLog {
+                                trackingService.logEvent("PASTE_ACTION", studentId, mapOf("filePath" to filePath, "length" to pendingPasteLength))
+                            }
+                            actionId == "\$Undo" -> {
+                                consecutiveUndos = if (lastActionId == "\$Undo") consecutiveUndos + 1 else 1
+                                safeLog {
+                                    trackingService.logEvent(
+                                        "UNDO_ACTION", studentId,
+                                        mapOf("filePath" to filePath, "consecutiveUndos" to consecutiveUndos)
+                                    )
+                                }
+                            }
+                            isSearchAction(actionId) -> safeLog {
+                                trackingService.logEvent(
+                                    "SEARCH_USED", studentId,
+                                    mapOf("searchType" to actionId, "queryLength" to 0)
+                                )
+                            }
+                        }
+                        lastActionId = actionId
+                    } catch (e: Throwable) {
+                        println("ActivityTracker: editorAction afterActionPerformed failed: ${e.message}")
+                    }
+                }
+            }
+        )
+    }
+
+    private fun registerAutocompleteTracker() {
+        project.messageBus.connect().subscribe(
+            LookupManagerListener.TOPIC,
+            object : LookupManagerListener {
+                override fun activeLookupChanged(oldLookup: Lookup?, newLookup: Lookup?) {
+                    newLookup?.addLookupListener(object : LookupListener {
+                        override fun itemSelected(event: LookupEvent) {
+                            try {
+                                val completion = event.item?.lookupString ?: return
+                                val file = FileDocumentManager.getInstance().getFile(newLookup.editor.document)
+                                val filePath = file?.path ?: "unknown"
+                                safeLog {
+                                    trackingService.logEvent(
+                                        "AUTOCOMPLETE_USED", studentId,
+                                        mapOf("filePath" to filePath, "completion" to completion)
+                                    )
+                                }
+                            } catch (e: Throwable) {
+                                println("ActivityTracker: AUTOCOMPLETE_USED handler failed: ${e.message}")
+                            }
+                        }
+                    })
+                }
+            }
+        )
+    }
+
     private fun registerTestExecutionTracker() {
         project.messageBus.connect().subscribe(
             ExecutionManager.EXECUTION_TOPIC,
@@ -316,6 +513,10 @@ class ActivityTracker(
                 }
             }
         )
+    }
+
+    private fun isSearchAction(actionId: String): Boolean {
+        return actionId in setOf("Find", "FindNext", "FindPrevious", "FindInPath", "Replace", "ReplaceInPath")
     }
 
     private fun isCompilationAction(actionId: String): Boolean {
