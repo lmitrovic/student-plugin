@@ -261,17 +261,21 @@ class StudentFormPanel(
             println("Tracking logEvent failed: ${e.message}")
         }
         val currentProject = ProjectManager.getInstance().openProjects[0]
-        FileDocumentManager.getInstance().saveAllDocuments()
+        ApplicationManager.getApplication().runWriteAction {
+            FileDocumentManager.getInstance().saveAllDocuments()
+        }
 
         ApplicationManager.getApplication().executeOnPooledThread {
             studentService.setProjectRoot(currentProject.basePath)
             if (studentService.submitAssignment(false)) {
-                JOptionPane.showMessageDialog(
-                    null,
-                    "Uspešno ste predali rad!",
-                    "Uspešno",
-                    JOptionPane.INFORMATION_MESSAGE
-                )
+                ApplicationManager.getApplication().invokeLater {
+                    JOptionPane.showMessageDialog(
+                        null,
+                        "Uspešno ste predali rad!",
+                        "Uspešno",
+                        JOptionPane.INFORMATION_MESSAGE
+                    )
+                }
             }
         }
     }
@@ -293,7 +297,9 @@ class StudentFormPanel(
             println("Tracking logEvent failed: ${e.message}")
         }
         val currentProject = ProjectManager.getInstance().openProjects[0]
-        FileDocumentManager.getInstance().saveAllDocuments()
+        ApplicationManager.getApplication().runWriteAction {
+            FileDocumentManager.getInstance().saveAllDocuments()
+        }
 
         ApplicationManager.getApplication().executeOnPooledThread {
             studentService.setProjectRoot(currentProject.basePath)
@@ -305,8 +311,6 @@ class StudentFormPanel(
             }
 
             if (isPushSuccess) {
-                finalSubmissionButton.isEnabled = false
-
                 val studentId =
                     "${studentsStudyProgramTF.text}-${studentsIndexNumberTF.text}-${studentsStartYearTF.text}"
                 try {
@@ -315,20 +319,26 @@ class StudentFormPanel(
                     println("=== FeedbackDashboard finish FAILED: ${e.message} ===")
                 }
 
-                JOptionPane.showMessageDialog(
-                    null,
-                    "Uspešno ste predali rad!",
-                    "Uspešno",
-                    JOptionPane.INFORMATION_MESSAGE
-                )
+                ApplicationManager.getApplication().invokeLater {
+                    finalSubmissionButton.isEnabled = false
+
+                    JOptionPane.showMessageDialog(
+                        null,
+                        "Uspešno ste predali rad!",
+                        "Uspešno",
+                        JOptionPane.INFORMATION_MESSAGE
+                    )
+                }
             } else {
                 println("Failed to push changes to new branch.")
-                JOptionPane.showMessageDialog(
-                    null,
-                    "Greška tokom predaje rada!",
-                    "Greška",
-                    JOptionPane.INFORMATION_MESSAGE
-                )
+                ApplicationManager.getApplication().invokeLater {
+                    JOptionPane.showMessageDialog(
+                        null,
+                        "Greška tokom predaje rada!",
+                        "Greška",
+                        JOptionPane.INFORMATION_MESSAGE
+                    )
+                }
             }
         }
     }
