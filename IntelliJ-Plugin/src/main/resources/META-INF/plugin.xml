@@ -1,11 +1,10 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
     <id>com.github.lmitrovic.studenttestingintellijplugin</id>
-    <name>Studentski plugin</name>
+    <name>Studentski Panel</name>
     <vendor>lmitrovic</vendor>
     <!-- VERZIJA -->
     <idea-version since-build="261" />
-
 
     <depends>com.intellij.modules.platform</depends>
     <depends>org.jetbrains.idea.maven</depends>

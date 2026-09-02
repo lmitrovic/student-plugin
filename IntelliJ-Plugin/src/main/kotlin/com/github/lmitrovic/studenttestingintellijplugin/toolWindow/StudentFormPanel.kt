@@ -37,7 +37,6 @@ class StudentFormPanel(
     private val studentsStudyProgramTF = JBTextField().apply { emptyText.text = "SI, RI ili RN" }
     private val studentsIndexNumberTF = JTextField()
     private val studentsStartYearTF = JTextField()
-    private val studentsTaskGroupTF = JTextField()
     private val classroomNameTF = JTextField()
     private val studentsTermCB = JComboBox<Any>()
     private val testGroupCB = JComboBox<Any>()
@@ -96,8 +95,6 @@ class StudentFormPanel(
             add(labeledRow("Broj indeksa:", studentsIndexNumberTF))
             add(Box.createRigidArea(Dimension(0, gap)))
             add(labeledRow("Godina upisa:", studentsStartYearTF))
-            add(Box.createRigidArea(Dimension(0, gap)))
-            add(labeledRow("Studentska grupa:", studentsTaskGroupTF))
             add(Box.createRigidArea(Dimension(0, gap)))
             add(labeledRow("Učionica:", classroomNameTF))
         }
@@ -164,7 +161,6 @@ class StudentFormPanel(
             studentsStudyProgramTF.text,
             studentsIndexNumberTF.text,
             studentsStartYearTF.text,
-            studentsTaskGroupTF.text,
             classroomNameTF.text
         )
         if (error != null) {
@@ -184,7 +180,7 @@ class StudentFormPanel(
                 studentsIndexNumberTF.text.toInt(),
                 studentsStartYearTF.text,
                 studentsStudyProgramTF.text,
-                studentsTaskGroupTF.text,
+                "",
                 studentsFirstNameTF.text,
                 studentsLastNameTF.text,
                 subjectCB.selectedItem?.toString(),
@@ -247,7 +243,6 @@ class StudentFormPanel(
         studentsStudyProgramTF.isEnabled = false
         studentsIndexNumberTF.isEnabled = false
         studentsStartYearTF.isEnabled = false
-        studentsTaskGroupTF.isEnabled = false
         classroomNameTF.isEnabled = false
         subjectCB.isEnabled = false
         testGroupCB.isEnabled = false
