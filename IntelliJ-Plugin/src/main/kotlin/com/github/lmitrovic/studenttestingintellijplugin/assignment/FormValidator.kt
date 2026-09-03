@@ -8,7 +8,6 @@ object FormValidator {
         studyProgram: String,
         indexNumber: String,
         startYear: String,
-        taskGroup: String,
         classroom: String
     ): String? {
         if (firstName.isBlank())    return "Ime je obavezno."
@@ -18,7 +17,6 @@ object FormValidator {
         if (indexNumber.toIntOrNull() == null) return "Broj indeksa mora biti broj."
         if (startYear.isBlank())    return "Godina upisa je obavezna."
         if (startYear.toIntOrNull() == null)   return "Godina upisa mora biti broj."
-        if (taskGroup.isBlank())    return "Studentska grupa je obavezna."
         if (classroom.isBlank())    return "Učionica je obavezna."
         return null
     }

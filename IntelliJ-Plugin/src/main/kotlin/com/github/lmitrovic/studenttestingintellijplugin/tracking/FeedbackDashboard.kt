@@ -1,11 +1,13 @@
 package com.github.lmitrovic.studenttestingintellijplugin.tracking
 
+import com.github.lmitrovic.studenttestingintellijplugin.config.RafConfig
+import com.github.lmitrovic.studenttestingintellijplugin.util.JsonBuilder
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer
-import com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerImpl
-import com.intellij.lang.annotation.HighlightSeverity
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.CommandEvent
 import com.intellij.openapi.command.CommandListener
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
@@ -15,28 +17,29 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.Disposer
 import java.awt.KeyEventDispatcher
 import java.awt.KeyboardFocusManager
 import java.awt.event.KeyEvent
-import java.net.HttpURLConnection
-import java.net.URL
 import java.time.LocalDateTime
 import javax.swing.Timer
 import kotlin.text.RegexOption
 
 class FeedbackDashboard(
     private val project: Project,
-    private val studentId: String
+    private val studentId: String,
+    private val parentDisposable: Disposable
 ) {
 
-    private val apiClient = StudentApiClient()
+    private val log = Logger.getInstance(FeedbackDashboard::class.java)
+    private val apiClient = FeedbackApiClient()
 
     private var keystrokeCount = 0
     private var deletionBursts = mutableListOf<Int>()
     private var currentBurstSize = 0
     private var inDeletionMode = false
     private var lastEventTime = 0L
-    private val BURST_TIMEOUT_MS = 2000L
+    private val burstTimeoutMs = 2000L
     private var classLines = 0
     private var compileErrors = 0
     private var runtimeErrors = 0
@@ -46,20 +49,28 @@ class FeedbackDashboard(
     private val snapshotHistory = mutableListOf<Set<String>>()
 
     fun start() {
-        try { registerDocumentListener() } catch (e: Throwable) { println("FeedbackDashboard: registerDocumentListener failed: ${e.message}") }
-        try { registerCommandListener() } catch (e: Throwable) { println("FeedbackDashboard: registerCommandListener failed: ${e.message}") }
-        try { registerKeyDispatcher() } catch (e: Throwable) { println("FeedbackDashboard: registerKeyDispatcher failed: ${e.message}") }
-        try { registerFileSwitchListener() } catch (e: Throwable) { println("FeedbackDashboard: registerFileSwitchListener failed: ${e.message}") }
-        try { registerCompileErrorListener() } catch (e: Throwable) { println("FeedbackDashboard: registerCompileErrorListener failed: ${e.message}") }
-        try { startFeedbackTimer() } catch (e: Throwable) { println("FeedbackDashboard: startFeedbackTimer failed: ${e.message}") }
-        println("Feedback Dashboard listeneri pokrenuti za: $studentId")
+        registerSafely("registerDocumentListener") { registerDocumentListener() }
+        registerSafely("registerCommandListener") { registerCommandListener() }
+        registerSafely("registerKeyDispatcher") { registerKeyDispatcher() }
+        registerSafely("registerFileSwitchListener") { registerFileSwitchListener() }
+        registerSafely("registerCompileErrorListener") { registerCompileErrorListener() }
+        registerSafely("startFeedbackTimer") { startFeedbackTimer() }
+        log.info("Feedback Dashboard listeneri pokrenuti za: $studentId")
     }
 
     fun finish() {
         try {
             apiClient.notifyFinished(studentId)
         } catch (e: Throwable) {
-            println("FeedbackDashboard: notifyFinished failed: ${e.message}")
+            log.warn("FeedbackDashboard: notifyFinished nije uspeo: ${e.message}")
+        }
+    }
+
+    private fun registerSafely(name: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (e: Throwable) {
+            log.warn("FeedbackDashboard: $name nije uspeo", e)
         }
     }
 
@@ -72,14 +83,14 @@ class FeedbackDashboard(
                             try {
                                 classLines = event.document.lineCount
                                 val added = event.newLength - event.oldLength
-                                if (added > 0 && added <= 100) {
+                                if (added in 1..100) {
                                     keystrokeCount += added
-                                    println("KR DEBUG: +$added chars, total=$keystrokeCount")
+                                    log.debug("KR: +$added chars, total=$keystrokeCount")
                                 } else if (added > 100) {
-                                    println("KR DEBUG: IGNORISANA velika promena ($added chars) - Paste/Format")
+                                    log.debug("KR: ignorisana velika promena ($added chars) - Paste/Format")
                                 }
                             } catch (e: Throwable) {
-                                println("FeedbackDashboard: documentChanged failed: ${e.message}")
+                                log.warn("FeedbackDashboard: documentChanged nije uspeo: ${e.message}")
                             }
                         }
 
@@ -90,7 +101,7 @@ class FeedbackDashboard(
                                 if (oldLength > newLength) {
                                     val now = System.currentTimeMillis()
                                     val deletedCount = oldLength - newLength
-                                    if (!inDeletionMode || (now - lastEventTime) > BURST_TIMEOUT_MS) {
+                                    if (!inDeletionMode || (now - lastEventTime) > burstTimeoutMs) {
                                         if (inDeletionMode && currentBurstSize > 5) {
                                             deletionBursts.add(currentBurstSize)
                                         }
@@ -101,18 +112,18 @@ class FeedbackDashboard(
                                     lastEventTime = now
                                 }
                             } catch (e: Throwable) {
-                                println("FeedbackDashboard: beforeDocumentChange failed: ${e.message}")
+                                log.warn("FeedbackDashboard: beforeDocumentChange nije uspeo: ${e.message}")
                             }
                         }
-                    })
+                    }, parentDisposable)
                 }
             },
-            project
+            parentDisposable
         )
     }
 
     private fun registerCommandListener() {
-        project.messageBus.connect().subscribe(
+        project.messageBus.connect(parentDisposable).subscribe(
             CommandListener.TOPIC,
             object : CommandListener {
                 override fun beforeCommandFinished(event: CommandEvent) {
@@ -126,7 +137,7 @@ class FeedbackDashboard(
                         val now = System.currentTimeMillis()
                         val selectionModel = currentEditor.selectionModel
 
-                        if (!inDeletionMode || (now - lastEventTime) > BURST_TIMEOUT_MS) {
+                        if (!inDeletionMode || (now - lastEventTime) > burstTimeoutMs) {
                             if (inDeletionMode && currentBurstSize > 5) {
                                 deletionBursts.add(currentBurstSize)
                             }
@@ -137,9 +148,9 @@ class FeedbackDashboard(
                         val deletedCount = if (selectionModel.hasSelection()) selectionModel.selectedText?.length ?: 1 else 1
                         currentBurstSize += deletedCount
                         lastEventTime = now
-                        println("DB DEBUG: Deleted $deletedCount chars, burst size=$currentBurstSize")
+                        log.debug("DB: deleted $deletedCount chars, burst=$currentBurstSize")
                     } catch (e: Throwable) {
-                        println("FeedbackDashboard: beforeCommandFinished failed: ${e.message}")
+                        log.warn("FeedbackDashboard: beforeCommandFinished nije uspeo: ${e.message}")
                     }
                 }
             }
@@ -149,15 +160,13 @@ class FeedbackDashboard(
     private fun registerKeyDispatcher() {
         val keyDispatcher = KeyEventDispatcher { keyEvent ->
             try {
-                if (keyEvent.id == KeyEvent.KEY_PRESSED &&
-                    keyEvent.keyCode == KeyEvent.VK_DELETE
-                ) {
+                if (keyEvent.id == KeyEvent.KEY_PRESSED && keyEvent.keyCode == KeyEvent.VK_DELETE) {
                     val currentEditor = FileEditorManager.getInstance(project).selectedTextEditor
                     if (currentEditor != null) {
                         val now = System.currentTimeMillis()
                         val selectionModel = currentEditor.selectionModel
 
-                        if (!inDeletionMode || (now - lastEventTime) > BURST_TIMEOUT_MS) {
+                        if (!inDeletionMode || (now - lastEventTime) > burstTimeoutMs) {
                             if (inDeletionMode && currentBurstSize > 5) {
                                 deletionBursts.add(currentBurstSize)
                             }
@@ -168,34 +177,36 @@ class FeedbackDashboard(
                         val deletedCount = if (selectionModel.hasSelection()) selectionModel.selectedText?.length ?: 1 else 1
                         currentBurstSize += deletedCount
                         lastEventTime = now
-                        println("DB DEBUG: Delete key deleted $deletedCount chars, burst=$currentBurstSize")
+                        log.debug("DB: Delete key deleted $deletedCount chars, burst=$currentBurstSize")
                     }
                 }
             } catch (e: Throwable) {
-                println("FeedbackDashboard: keyDispatcher failed: ${e.message}")
+                log.warn("FeedbackDashboard: keyDispatcher nije uspeo: ${e.message}")
             }
             false
         }
-        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(keyDispatcher)
+        val kfm = KeyboardFocusManager.getCurrentKeyboardFocusManager()
+        kfm.addKeyEventDispatcher(keyDispatcher)
+        Disposer.register(parentDisposable) { kfm.removeKeyEventDispatcher(keyDispatcher) }
     }
 
     private fun registerFileSwitchListener() {
-        project.messageBus.connect().subscribe(
+        project.messageBus.connect(parentDisposable).subscribe(
             FileEditorManagerListener.FILE_EDITOR_MANAGER,
             object : FileEditorManagerListener {
                 override fun selectionChanged(event: FileEditorManagerEvent) {
                     try {
                         val now = System.currentTimeMillis()
                         if (event.oldFile != null && currentFileName.isNotEmpty()) {
-                            println("CFC DEBUG: Left file '$currentFileName', spent ${(now - currentFileStartTime) / 1000}s")
+                            log.debug("CFC: left file '$currentFileName', spent ${(now - currentFileStartTime) / 1000}s")
                         }
                         if (event.newFile != null) {
                             currentFileName = event.newFile!!.nameWithoutExtension
                             currentFileStartTime = now
-                            println("CFC DEBUG: Opened file '$currentFileName'")
+                            log.debug("CFC: opened file '$currentFileName'")
                         }
                     } catch (e: Throwable) {
-                        println("FeedbackDashboard: selectionChanged failed: ${e.message}")
+                        log.warn("FeedbackDashboard: selectionChanged nije uspeo: ${e.message}")
                     }
                 }
             }
@@ -203,7 +214,7 @@ class FeedbackDashboard(
     }
 
     private fun registerCompileErrorListener() {
-        project.messageBus.connect().subscribe(
+        project.messageBus.connect(parentDisposable).subscribe(
             DaemonCodeAnalyzer.DAEMON_EVENT_TOPIC,
             object : DaemonCodeAnalyzer.DaemonListener {
                 override fun daemonFinished() {
@@ -212,26 +223,21 @@ class FeedbackDashboard(
                             val currentEditor = FileEditorManager.getInstance(project)
                                 .selectedTextEditor ?: return@invokeLater
 
-                            val highlights = DaemonCodeAnalyzerImpl.getHighlights(
-                                currentEditor.document,
-                                HighlightSeverity.ERROR,
-                                project
-                            )
-
+                            val highlights = EditorErrors.errorHighlights(project, currentEditor.document)
 
                             compileErrors = highlights.count { h ->
                                 val desc = h.description ?: ""
                                 !desc.contains("runtime", ignoreCase = true) &&
-                                        !desc.contains("exception", ignoreCase = true)
+                                    !desc.contains("exception", ignoreCase = true)
                             }
                             runtimeErrors = highlights.count { h ->
                                 val desc = h.description ?: ""
                                 desc.contains("runtime", ignoreCase = true) ||
-                                        desc.contains("exception", ignoreCase = true)
+                                    desc.contains("exception", ignoreCase = true)
                             }
-                            println("ER DEBUG: compile=$compileErrors, runtime=$runtimeErrors")
+                            log.debug("ER: compile=$compileErrors, runtime=$runtimeErrors")
                         } catch (e: Throwable) {
-                            println("FeedbackDashboard: daemonFinished failed: ${e.message}")
+                            log.warn("FeedbackDashboard: daemonFinished nije uspeo: ${e.message}")
                         }
                     }
                 }
@@ -241,8 +247,10 @@ class FeedbackDashboard(
 
     private fun startFeedbackTimer() {
         val kolokvijumPocetak = System.currentTimeMillis()
+        val intervalMs = RafConfig.FEEDBACK_INTERVAL_MS
+        val intervalSec = intervalMs / 1000
 
-        val feedbackTimer = Timer(20000) {
+        val feedbackTimer = Timer(intervalMs) {
             try {
                 val now = System.currentTimeMillis()
                 val tCurrentSec = ((now - kolokvijumPocetak) / 1000).toInt()
@@ -260,42 +268,35 @@ class FeedbackDashboard(
                 if (inDeletionMode && currentBurstSize > 0) {
                     if (currentBurstSize > 5) {
                         deletionBursts.add(currentBurstSize)
-                        println("DB DEBUG: Final burst saved: $currentBurstSize")
+                        log.debug("DB: final burst saved: $currentBurstSize")
                     }
                     inDeletionMode = false
                     currentBurstSize = 0
                 }
 
-                val nodesJson = if (currentSnapshot.isEmpty()) "[]"
-                else currentSnapshot.joinToString(separator = "\", \"", prefix = "[\"", postfix = "\"]")
+                val json = JsonBuilder.obj(
+                    "student_id" to studentId,
+                    "timestamp" to LocalDateTime.now().toString(),
+                    "window_start_sec" to (tCurrentSec - intervalSec),
+                    "window_end_sec" to tCurrentSec,
+                    "t_current_min" to (tCurrentSec / 60),
+                    "t_total_min" to RafConfig.EXAM_DURATION_MINUTES,
+                    "metrics" to mapOf(
+                        "keystroke_count" to keystrokeCount,
+                        "compile_errors" to compileErrors,
+                        "runtime_errors" to runtimeErrors,
+                        "time_on_class_seconds" to timeOnClassSec,
+                        "class_line_count" to currentLines,
+                        "delta_lines" to deltaL,
+                        "deletion_bursts" to deletionBursts.sum(),
+                        "ast_nodes" to currentSnapshot.toList(),
+                        "cs_value" to csValue,
+                        "snapshot_history_size" to snapshotHistory.size
+                    )
+                )
 
-                val json = """
-{
-    "student_id": "$studentId",
-    "timestamp": "${LocalDateTime.now()}",
-    "window_start_sec": ${tCurrentSec - 20},
-    "window_end_sec": $tCurrentSec,
-    "t_current_min": ${tCurrentSec / 60},
-    "t_total_min": 180,
-    "metrics": {
-        "keystroke_count": $keystrokeCount,
-        "compile_errors": $compileErrors,
-        "runtime_errors": $runtimeErrors,
-        "time_on_class_seconds": $timeOnClassSec,
-        "class_line_count": $currentLines,
-        "delta_lines": $deltaL,
-        "deletion_bursts": ${deletionBursts.sum()},
-        "ast_nodes": $nodesJson,
-        "cs_value": $csValue,
-        "snapshot_history_size": ${snapshotHistory.size}
-    }
-}
-    """.trimIndent()
-
-                println("=== WINDOW ${tCurrentSec / 20} ===")
-                println("KR: $keystrokeCount, DB: ${deletionBursts.joinToString()}, CS: $csValue")
-                println("ER: compile=$compileErrors, runtime=$runtimeErrors")
-                println("CFC: timeOnClass=$timeOnClassSec sec, deltaL=$deltaL")
+                log.debug("WINDOW ${tCurrentSec / intervalSec} | KR=$keystrokeCount DB=${deletionBursts.joinToString()} CS=$csValue " +
+                    "compile=$compileErrors runtime=$runtimeErrors timeOnClass=${timeOnClassSec}s deltaL=$deltaL")
 
                 keystrokeCount = 0
                 compileErrors = 0
@@ -303,27 +304,14 @@ class FeedbackDashboard(
                 deletionBursts = mutableListOf()
 
                 ApplicationManager.getApplication().executeOnPooledThread {
-                    try {
-                        val url = URL("http://157.180.37.247/api/data")
-                        val conn = url.openConnection() as HttpURLConnection
-                        conn.requestMethod = "POST"
-                        conn.setRequestProperty("Content-Type", "application/json")
-                        conn.connectTimeout = 5000
-                        conn.readTimeout = 5000
-                        conn.doOutput = true
-                        conn.outputStream.use { it.write(json.toByteArray()) }
-                        val responseCode = conn.responseCode
-                        println("Feedback API: $responseCode | student: $studentId")
-                        conn.disconnect()
-                    } catch (e: Throwable) {
-                        println("Greška pri slanju metrika: ${e.message}")
-                    }
+                    apiClient.sendMetrics(json)
                 }
             } catch (e: Throwable) {
-                println("FeedbackDashboard: feedbackTimer tick failed: ${e.message}")
+                log.warn("FeedbackDashboard: feedbackTimer tick nije uspeo: ${e.message}")
             }
         }
 
+        Disposer.register(parentDisposable) { feedbackTimer.stop() }
         feedbackTimer.start()
     }
 

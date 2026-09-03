@@ -12,8 +12,6 @@ plugins {
     alias(libs.plugins.changelog) // Gradle Changelog Plugin
     alias(libs.plugins.qodana) // Gradle Qodana Plugin
     alias(libs.plugins.kover) // Gradle Kover Plugin
-    // Adds 'java-library-distribution' plugin
-    `java-library-distribution`
 }
 
 group = properties("pluginGroup").get()
@@ -32,9 +30,7 @@ repositories {
 
 // Dependencies are managed with Gradle version catalog - read more: https://docs.gradle.org/current/userguide/platforms.html#sub:version-catalog
 dependencies {
-    api("org.junit.jupiter:junit-jupiter-api:5.10.0")
-    implementation("org.junit.jupiter:junit-jupiter-api:5.10.0")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.0")
     testImplementation("org.mockito.kotlin:mockito-kotlin:3.2.0")
 
     // Jit za stub dependecy
@@ -43,8 +39,9 @@ dependencies {
 
     // IntelliJ Platform Gradle Plugin Dependencies Extension - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-dependencies-extension.html
     intellijPlatform {
-        // IntelliJ IDEA Community (IC) is no longer published as a separate artifact since 2025.3 (253);
-        // the unified IntelliJ IDEA distribution is used instead.
+        // Unified IntelliJ IDEA distribution (IC is no longer a separate artifact since 2025.3 / 253).
+        // It ships the Ultimate-only plugins too; without a licence they can't load and spam the
+        // log on every runIde - the `runIde` task below disables them in the dev sandbox.
         intellijIdea(properties("platformVersion"))
 
         // Plugin Dependencies. Uses `platformPlugins` property from the gradle.properties file.
@@ -56,7 +53,7 @@ dependencies {
     }
 }
 
-// Set the JVM language level used to build the project. Use Java 11 for 2020.3+, and Java 17 for 2022.2+.
+// JVM toolchain used to build the plugin. Platform 2026.1 (261) requires JDK 21.
 kotlin {
     @Suppress("UnstableApiUsage")
     jvmToolchain {
@@ -122,7 +119,10 @@ intellijPlatform {
 
     pluginVerification {
         ides {
-            recommended()
+            // `recommended()` povlači sve najnovije patch/EAP build-ove (2026.1.5, ...) i skida ih zasebno.
+            // `current()` verifikuje protiv iste platforme na kojoj se plugin gradi (platformVersion, 2026.1.3) -
+            // bez dodatnog preuzimanja.
+            current()
         }
     }
 
@@ -162,9 +162,71 @@ tasks {
     }
 
     test {
-        // The only test class (MyPluginTest) is currently fully commented out. Gradle 9 fails the
-        // `test` task when test sources exist but nothing is discovered - relax that until real tests exist.
+        // Nema jos test klasa; Gradle 9 podrazumevano obara `test` kad se nista ne otkrije.
         failOnNoDiscoveredTests = false
+    }
+
+    prepareSandbox {
+        // Dev sandbox only. The unified IntelliJ IDEA distribution bundles every Ultimate plugin
+        // (Spring Boot/Cloud/..., Jakarta EE, JS debugger/Node/Karma/Next, Kubernetes, Docker
+        // gateway, FreeMarker, Velocity, ...). Without an Ultimate licence they fail to load and
+        // each one logs "has dependency on 'JetBrains Ultimate' which cannot be loaded" on every
+        // launch. None are used by the student workflow, so list them here - the IDE then treats
+        // them as intentionally disabled and stays quiet. Written to
+        // <sandbox>/config/disabled_plugins.txt; unknown ids are ignored.
+        //
+        // This is the closure of "bundled plugins that hard-depend on com.intellij.modules.ultimate"
+        // for platform 2026.1; re-check with `printBundledPlugins` after a platform bump. The
+        // Community-flavoured base plugins they build on (JavaScript, Spring, Database Tools,
+        // Jakarta EE core) still load, so React/Vue/Thymeleaf/Flyway/... are unaffected.
+        disabledPlugins.addAll(
+            "Refactor-X",
+            "com.intellij.LineProfiler",
+            "com.intellij.aop",
+            "com.intellij.cron",
+            "com.intellij.freemarker",
+            "com.intellij.velocity",
+            "com.intellij.hibernate",
+            "com.intellij.persistence",
+            "com.intellij.micronaut",
+            "com.intellij.quarkus",
+            "com.intellij.kubernetes",
+            "com.intellij.tailwindcss",
+            "com.intellij.tasks.timeTracking",
+            "com.intellij.beanValidation",
+            "com.intellij.cdi",
+            "com.intellij.jsp",
+            "com.intellij.javaee.web",
+            "com.intellij.javaee.jpa",
+            "com.intellij.javaee.extensions",
+            "com.intellij.javaee.jakarta.data",
+            "com.intellij.javaee.reverseEngineering",
+            "com.intellij.javaee.app.servers.integration",
+            "com.intellij.spring.mvc",
+            "com.intellij.spring.data",
+            "com.intellij.spring.cloud",
+            "com.intellij.spring.security",
+            "com.intellij.spring.messaging",
+            "com.intellij.spring.modulith",
+            "com.intellij.spring.integration",
+            "com.deadlock.scsyntax",
+            "com.jetbrains.gateway",
+            "com.jetbrains.restWebServices",
+            "com.jetbrains.plugins.webDeployment",
+            "intellij.debuggerMcp",
+            "intellij.nextjs",
+            "JavaScriptDebugger",
+            "NodeJS",
+            "Karma",
+            "JBoss",
+            "Tomcat",
+            "org.intellij.plugins.postcss",
+            "org.jetbrains.plugins.less",
+            "org.jetbrains.plugins.sass",
+            "org.jetbrains.plugins.remote-run",
+            "org.jetbrains.plugins.docker.gateway",
+            "org.jetbrains.plugins.node-remote-interpreter",
+        )
     }
 
     runIde {
@@ -174,5 +236,9 @@ tasks {
         // own Netty, not this plugin, so opt in to the access to silence the noise. Dev-sandbox
         // only - this flag is not part of the built/published plugin.
         jvmArgs("--sun-misc-unsafe-memory-access=allow")
+
+        // JBR prints "[warning][cds] Archived non-system classes are disabled ..." on every
+        // launch because the platform sets a custom system class loader. Silence that log tag.
+        jvmArgs("-Xlog:cds=off")
     }
 }

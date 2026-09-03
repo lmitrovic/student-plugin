@@ -1,19 +1,18 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
     <id>com.github.lmitrovic.studenttestingintellijplugin</id>
-    <name>Studentski plugin</name>
-    <vendor>lmitrovic</vendor>
-    <!-- VERZIJA -->
-    <idea-version since-build="261" />
+    <name>Studentski Panel</name>
+    <vendor url="https://github.com/RAFSoftLab">RAFSoftLab</vendor>
 
+    <!-- since-build / until-build se postavljaju iz gradle.properties preko patchPluginXml -->
 
     <depends>com.intellij.modules.platform</depends>
     <depends>org.jetbrains.idea.maven</depends>
 
-    <resource-bundle>messages.MyBundle</resource-bundle>
-
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.lmitrovic.studenttestingintellijplugin.toolWindow.MyToolWindowFactory" id="Studentski plugin" icon="/icons/pluginIcon.svg"/>
+        <toolWindow factoryClass="com.github.lmitrovic.studenttestingintellijplugin.toolWindow.MyToolWindowFactory"
+                    id="Studentski plugin"
+                    icon="/icons/pluginIcon.svg"/>
 
         <notificationGroup id="RAF LMS Updates"
                            displayType="BALLOON"
@@ -21,11 +20,4 @@
 
         <postStartupActivity implementation="com.github.lmitrovic.studenttestingintellijplugin.startup.PluginStartupActivity"/>
     </extensions>
-
-    <applicationListeners>
-        <listener class="com.github.lmitrovic.studenttestingintellijplugin.listeners.MyApplicationActivationListener" topic="com.intellij.openapi.application.ApplicationActivationListener"/>
-    </applicationListeners>
-
-    <actions>
-    </actions>
 </idea-plugin>
