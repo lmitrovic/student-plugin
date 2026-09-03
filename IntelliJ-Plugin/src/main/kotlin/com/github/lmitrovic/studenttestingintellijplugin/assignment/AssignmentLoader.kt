@@ -1,8 +1,9 @@
 package com.github.lmitrovic.studenttestingintellijplugin.assignment
 
-import com.github.lmitrovic.studenttestingintellijplugin.MyBundle
+import com.github.lmitrovic.studenttestingintellijplugin.config.RafConfig
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.WriteAction
+import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.project.Project
@@ -11,33 +12,96 @@ import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFileManager
 import org.jetbrains.idea.maven.project.MavenProjectsManager
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import javax.swing.JOptionPane
 
 class AssignmentLoader(private val project: Project) {
+
+    private val log = thisLogger()
+
+    /** Fajlovi/folderi koji se nikad ne diraju pri zameni sadržaja projekta. */
+    private val preserved = setOf(".idea", ".git")
 
     fun copyAndLoad() {
         ApplicationManager.getApplication().invokeLater {
             val projectDir = File(project.basePath ?: return@invokeLater)
-            val assignmentSource = File(System.getProperty("user.home"), MyBundle.downloadFolder)
+            val assignmentSource = File(System.getProperty("user.home"), RafConfig.DOWNLOAD_FOLDER_NAME)
 
             FileDocumentManager.getInstance().saveAllDocuments()
             VirtualFileManager.getInstance().syncRefresh()
 
+            val sourceVf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(assignmentSource)
+            val incoming = sourceVf?.children?.filter { it.name !in preserved }.orEmpty()
+
+            // Zaštita: ako je preuzimanje zakazalo i folder je prazan, ne diramo projekat.
+            if (incoming.isEmpty()) {
+                log.warn("Preuzeti zadatak je prazan (${assignmentSource.path}) - sadržaj projekta ostaje netaknut.")
+                JOptionPane.showMessageDialog(
+                    null,
+                    "Preuzimanje zadatka nije donelo nijedan fajl. Vaš postojeći sadržaj nije menjan.\n" +
+                        "Pokušajte ponovo ili se obratite dežurnom nastavniku.",
+                    "Preuzimanje neuspešno",
+                    JOptionPane.ERROR_MESSAGE
+                )
+                return@invokeLater
+            }
+
+            backupCurrentProject(projectDir)
+
             WriteAction.run<Throwable> {
                 val projectVf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(projectDir) ?: return@run
                 projectVf.children
-                    .filter { it.name != ".idea" && it.name != ".git" }
+                    .filter { it.name !in preserved }
                     .forEach { it.delete(this) }
 
-                val sourceVf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(assignmentSource) ?: return@run
-                sourceVf.children
-                    .filter { it.name != ".idea" && it.name != ".git" }
-                    .forEach { child -> VfsUtil.copy(this, child, projectVf) }
-
-                File(System.getProperty("user.home"), MyBundle.downloadFolder).deleteRecursively()
+                incoming.forEach { child -> VfsUtil.copy(this, child, projectVf) }
             }
+
+            assignmentSource.deleteRecursively()
 
             VirtualFileManager.getInstance().syncRefresh()
             loadProjectStructure()
+        }
+    }
+
+    private val backupRoot: File
+        get() = File(System.getProperty("user.home"), RafConfig.BACKUP_FOLDER_NAME)
+
+    /**
+     * Best-effort kopija trenutnog sadržaja projekta u `~/<BACKUP_FOLDER_NAME>/<projekat>-<vreme>/`
+     * pre nego što se pregazi. Briše se posle uspešne predaje rada ([deleteBackups]). Ako ne
+     * uspe, samo se loguje - izrada zadatka se svejedno nastavlja.
+     */
+    private fun backupCurrentProject(projectDir: File) {
+        try {
+            val entries = projectDir.listFiles()
+                ?.filter { it.name !in preserved && it.name != ".gradle" && it.name != "build" && it.name != "out" }
+                .orEmpty()
+            if (entries.isEmpty()) return
+
+            backupRoot.mkdirs()
+
+            val stamp = SimpleDateFormat("yyyyMMdd-HHmmss").format(Date())
+            val target = File(backupRoot, "${projectDir.name}-$stamp")
+            entries.forEach { it.copyRecursively(File(target, it.name), overwrite = true) }
+            log.info("Backup postojećeg projekta: ${target.path}")
+        } catch (e: Throwable) {
+            log.warn("Backup projekta nije uspeo (nastavljam sa preuzimanjem zadatka)", e)
+        }
+    }
+
+    /**
+     * Briše sve backup-e ovog projekta iz `~/<BACKUP_FOLDER_NAME>/`. Poziva se posle uspešne
+     * predaje rada - tada backup više nije potreban.
+     */
+    fun deleteBackups() {
+        try {
+            val name = File(project.basePath ?: return).name
+            backupRoot.listFiles { f -> f.isDirectory && f.name.startsWith("$name-") }
+                ?.forEach { it.deleteRecursively() }
+        } catch (e: Throwable) {
+            log.warn("Brisanje backup-a nije uspelo", e)
         }
     }
 
@@ -48,7 +112,7 @@ class AssignmentLoader(private val project: Project) {
             try {
                 MavenProjectsManager.getInstance(project).forceUpdateAllProjectsOrFindAllAvailablePomFiles()
             } catch (e: Throwable) {
-                println("Maven import failed: ${e.message}")
+                log.warn("Maven import nije uspeo", e)
             }
         } else {
             reloadJavaModules()
@@ -88,7 +152,7 @@ class AssignmentLoader(private val project: Project) {
                 model.commit()
             }
         } catch (e: Throwable) {
-            println("Java module reload failed: ${e.message}")
+            log.warn("Reload Java modula nije uspeo", e)
         }
     }
 }

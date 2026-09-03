@@ -1,20 +1,20 @@
 package com.github.lmitrovic.studenttestingintellijplugin.toolWindow
 
-import com.github.lmitrovic.studenttestingintellijplugin.MyBundle
 import com.github.lmitrovic.studenttestingintellijplugin.assignment.AssignmentLoader
 import com.github.lmitrovic.studenttestingintellijplugin.assignment.FormValidator
-import com.github.lmitrovic.studenttestingintellijplugin.tracking.ActivityTracker
-import com.github.lmitrovic.studenttestingintellijplugin.tracking.FeedbackDashboard
+import com.github.lmitrovic.studenttestingintellijplugin.config.RafConfig
+import com.github.lmitrovic.studenttestingintellijplugin.session.RafStubServices
+import com.github.lmitrovic.studenttestingintellijplugin.session.StudentSessionService
+import com.github.lmitrovic.studenttestingintellijplugin.session.StudentTrackingSession
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.ui.IdeBorderFactory
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
-import raflms.studentstub.api.StudentStubService
-import raflms.trackingstub.api.TrackingStubService
+import raflms.studentstub.api.datamodel.TestWithAssignments
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Dimension
@@ -24,11 +24,14 @@ import java.nio.file.Files
 import java.nio.file.Paths
 import javax.swing.*
 
-class StudentFormPanel(
-    private val project: Project,
-    private val studentService: StudentStubService,
-    private val trackingService: TrackingStubService
-) {
+class StudentFormPanel(private val project: Project) {
+
+    private val log = thisLogger()
+
+    private val services = RafStubServices.getInstance(project)
+    private val studentService get() = services.studentService
+    private val trackingService get() = services.trackingService
+    private val session = StudentSessionService.getInstance(project)
 
     val root: JPanel
 
@@ -40,7 +43,9 @@ class StudentFormPanel(
     private val classroomNameTF = JTextField()
     private val studentsTermCB = JComboBox<Any>()
     private val testGroupCB = JComboBox<Any>()
-    private val subjectCB: JComboBox<Any>
+    private val subjectCB = JComboBox<Any>()
+
+    private var allTestsData: List<TestWithAssignments> = emptyList()
 
     private val signInButton = JButton("Počni").apply {
         font = font.deriveFont(Font.BOLD, 13f)
@@ -62,22 +67,68 @@ class StudentFormPanel(
     private var currentStudentId = ""
 
     init {
-        val allTestsData = studentService.allTestsWithAssigmentsData
-        subjectCB = JComboBox(allTestsData.map { it.testName }.toTypedArray())
-
-        fun updateGroupsAndTerms() {
-            val selectedTestName = subjectCB.selectedItem as? String ?: return
-            val selectedTest = allTestsData.find { it.testName == selectedTestName } ?: return
-            val assignments = selectedTest.assigments ?: return
-            testGroupCB.model = DefaultComboBoxModel(assignments.mapNotNull { it.group }.distinct().toTypedArray())
-            studentsTermCB.model = DefaultComboBoxModel(assignments.mapNotNull { it.term }.distinct().toTypedArray())
-        }
-
         subjectCB.addActionListener { updateGroupsAndTerms() }
-        updateGroupsAndTerms()
-
         root = buildPanel()
         wireButtons()
+
+        if (session.isActive) {
+            restoreRunningSession()
+        } else {
+            loadTestsAsync()
+        }
+    }
+
+    /** Lista testova/termina se povlači sa servera - u pozadini, da ne blokira EDT pri otvaranju panela. */
+    private fun loadTestsAsync() {
+        subjectCB.model = DefaultComboBoxModel(arrayOf<Any>("Učitavanje..."))
+        subjectCB.isEnabled = false
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val data = try {
+                studentService.allTestsWithAssigmentsData
+            } catch (e: Throwable) {
+                log.warn("Neuspešno učitavanje liste testova", e)
+                emptyList()
+            }
+            ApplicationManager.getApplication().invokeLater {
+                allTestsData = data
+                subjectCB.model = DefaultComboBoxModel(data.map { it.testName as Any }.toTypedArray())
+                subjectCB.isEnabled = true
+                updateGroupsAndTerms()
+            }
+        }
+    }
+
+    private fun updateGroupsAndTerms() {
+        val selectedTestName = subjectCB.selectedItem as? String ?: return
+        val selectedTest = allTestsData.find { it.testName == selectedTestName } ?: return
+        val assignments = selectedTest.assigments ?: return
+        testGroupCB.model = DefaultComboBoxModel(assignments.mapNotNull { it.group }.distinct().toTypedArray())
+        studentsTermCB.model = DefaultComboBoxModel(assignments.mapNotNull { it.term }.distinct().toTypedArray())
+    }
+
+    private fun restoreRunningSession() {
+        val s = session.current
+        studentService.loggedStudentRepoPath = s.studentRepoPath
+        currentStudentId = s.studentId
+
+        studentsFirstNameTF.text = s.firstName
+        studentsLastNameTF.text = s.lastName
+        studentsStudyProgramTF.text = s.studyProgram
+        studentsIndexNumberTF.text = s.indexNumber
+        studentsStartYearTF.text = s.startYear
+        classroomNameTF.text = s.classroom
+        subjectCB.model = DefaultComboBoxModel(arrayOf<Any>(s.testName.ifBlank { "-" }))
+        testGroupCB.model = DefaultComboBoxModel(arrayOf<Any>(s.groupLabel.ifBlank { "-" }))
+        studentsTermCB.model = DefaultComboBoxModel(arrayOf<Any>(s.term.ifBlank { "-" }))
+
+        disableFormFields()
+        signInButton.isEnabled = false
+        signInButton.isVisible = false
+        commitButton.isVisible = false
+        finalSubmissionButton.isVisible = true
+
+        StudentTrackingSession.getInstance(project).start(trackingService, s.studentId, s.taskId)
+        log.info("Sesija obnovljena za ${s.studentId} / ${s.taskId}")
     }
 
     private fun buildPanel(): JPanel {
@@ -155,6 +206,16 @@ class StudentFormPanel(
     }
 
     private fun onBeginClicked() {
+        if (session.isActive) {
+            JOptionPane.showMessageDialog(
+                null,
+                "Izrada zadatka je već započeta. Nastavite rad i predajte ga dugmetom \"Predaj rad\".",
+                "Zadatak je već započet",
+                JOptionPane.WARNING_MESSAGE
+            )
+            return
+        }
+
         val error = FormValidator.validate(
             studentsFirstNameTF.text,
             studentsLastNameTF.text,
@@ -168,13 +229,20 @@ class StudentFormPanel(
             return
         }
 
-        val downloadPath = Paths.get(System.getProperty("user.home"), MyBundle.downloadFolder)
+        // Preuzimanje zadatka briše sadržaj otvorenog projekta - traži potvrdu pre bilo čega
+        // nepovratnog (pre serverskog `startAssigment`, pre `session.begin`).
+        if (!confirmProjectOverwrite()) {
+            return
+        }
+
+        val downloadPath = Paths.get(System.getProperty("user.home"), RafConfig.DOWNLOAD_FOLDER_NAME)
         if (Files.exists(downloadPath)) {
             downloadPath.toFile().listFiles()?.forEach { it.deleteRecursively() }
         } else {
             Files.createDirectory(downloadPath)
         }
 
+        signInButton.isEnabled = false
         ApplicationManager.getApplication().executeOnPooledThread {
             val success = studentService.startAssigment(
                 studentsIndexNumberTF.text.toInt(),
@@ -197,35 +265,37 @@ class StudentFormPanel(
                     val taskId = "${subjectCB.selectedItem}-${testGroupCB.selectedItem}-${studentsTermCB.selectedItem}"
                     currentStudentId = studentId
 
-                    try {
-                        trackingService.startTracking(studentId, taskId)
-                    } catch (e: Throwable) {
-                        println("=== TRACKING startTracking FAILED: ${e.message} ===")
-                    }
-                    println("=== TRACKING STARTED: $studentId, $taskId ===")
-                    try {
-                        ActivityTracker(project, trackingService, studentId).start()
-                    } catch (e: Throwable) {
-                        println("=== ActivityTracker FAILED: ${e.message} ===")
-                    }
-                    try {
-                        FeedbackDashboard(project, studentId).start()
-                    } catch (e: Throwable) {
-                        println("=== FeedbackDashboard FAILED: ${e.message} ===")
-                    }
+                    session.begin(StudentSessionService.State().apply {
+                        studentRepoPath = studentService.loggedStudentRepoPath ?: ""
+                        this.studentId = studentId
+                        this.taskId = taskId
+                        firstName = studentsFirstNameTF.text
+                        lastName = studentsLastNameTF.text
+                        studyProgram = studentsStudyProgramTF.text
+                        indexNumber = studentsIndexNumberTF.text
+                        startYear = studentsStartYearTF.text
+                        classroom = classroomNameTF.text
+                        testName = subjectCB.selectedItem?.toString().orEmpty()
+                        groupLabel = testGroupCB.selectedItem?.toString().orEmpty()
+                        term = studentsTermCB.selectedItem?.toString().orEmpty()
+                    })
+
+                    StudentTrackingSession.getInstance(project).start(trackingService, studentId, taskId)
 
                     AssignmentLoader(project).copyAndLoad()
                     disableFormFields()
 
-                    signInButton.isEnabled = false
                     signInButton.isVisible = false
                     commitButton.isVisible = false
                     finalSubmissionButton.isVisible = true
 
                     ApplicationManager.getApplication().invokeLater {
-                        LocalFileSystem.getInstance().refreshAndFindFileByPath(project.basePath!!)?.refresh(false, true)
+                        project.basePath?.let {
+                            LocalFileSystem.getInstance().refreshAndFindFileByPath(it)?.refresh(false, true)
+                        }
                     }
                 } else {
+                    signInButton.isEnabled = true
                     JOptionPane.showMessageDialog(
                         null,
                         "Nije uspelo preuzimanje zadatka.",
@@ -235,6 +305,57 @@ class StudentFormPanel(
                 }
             }
         }
+    }
+
+    /** Folderi/fajlovi u korenu projekta koje `AssignmentLoader` ionako ne dira. */
+    private val overwriteIgnored = setOf(".idea", ".git", ".gradle", "build", "out", ".DS_Store")
+
+    /**
+     * Potvrda pre nego što `AssignmentLoader` obriše sadržaj otvorenog projekta i ubaci zadatak.
+     * Prazan projekat ne traži potvrdu. Ako projekat ne liči na prazan ispitni (Git sa istorijom
+     * ili puno fajlova), dijalog se pojačava. Vraća true samo uz eksplicitnu potvrdu.
+     */
+    private fun confirmProjectOverwrite(): Boolean {
+        val basePath = project.basePath ?: return true
+        val projectDir = File(basePath)
+
+        val toDelete = projectDir.listFiles()
+            ?.filter { it.name !in overwriteIgnored }
+            .orEmpty()
+            .sortedBy { it.name.lowercase() }
+        if (toDelete.isEmpty()) return true
+
+        val gitHasHistory = File(projectDir, ".git/logs/HEAD").let { it.isFile && it.length() > 0 }
+        val risky = gitHasHistory || toDelete.size > 25
+
+        val listing = toDelete.take(15).joinToString("\n") { "   • ${it.name}${if (it.isDirectory) "/" else ""}" }
+        val more = (toDelete.size - 15).let { if (it > 0) "\n   … i još $it" else "" }
+
+        val message = buildString {
+            if (risky) {
+                append("UPOZORENJE: ovo ne liči na prazan ispitni projekat")
+                if (gitHasHistory) append(" (Git repozitorijum sa istorijom)")
+                append(".\n\n")
+            }
+            append("Preuzimanje zadatka će OBRISATI sledeći sadržaj projekta\n")
+            append(basePath).append(":\n\n")
+            append(listing).append(more)
+            append("\n\nKopija trenutnog sadržaja se pravi u ~/${RafConfig.BACKUP_FOLDER_NAME}/ i briše se nakon predaje rada.")
+            append("\n\nNastaviti?")
+        }
+
+        val options = arrayOf<Any>("Obriši i preuzmi zadatak", "Odustani")
+        val choice = JOptionPane.showOptionDialog(
+            null,
+            message,
+            "Potvrda preuzimanja zadatka",
+            JOptionPane.YES_NO_OPTION,
+            if (risky) JOptionPane.ERROR_MESSAGE else JOptionPane.WARNING_MESSAGE,
+            null,
+            options,
+            options[1],
+        )
+        return choice == JOptionPane.YES_OPTION
     }
 
     private fun disableFormFields() {
@@ -253,15 +374,14 @@ class StudentFormPanel(
         try {
             trackingService.logEvent("SUBMISSION_ATTEMPT", currentStudentId, mapOf("type" to "commit"))
         } catch (e: Throwable) {
-            println("Tracking logEvent failed: ${e.message}")
+            log.warn("Tracking logEvent nije uspeo: ${e.message}")
         }
-        val currentProject = ProjectManager.getInstance().openProjects[0]
         ApplicationManager.getApplication().runWriteAction {
             FileDocumentManager.getInstance().saveAllDocuments()
         }
 
         ApplicationManager.getApplication().executeOnPooledThread {
-            studentService.setProjectRoot(currentProject.basePath)
+            studentService.setProjectRoot(project.basePath)
             if (studentService.submitAssignment(false)) {
                 ApplicationManager.getApplication().invokeLater {
                     JOptionPane.showMessageDialog(
@@ -289,34 +409,27 @@ class StudentFormPanel(
         try {
             trackingService.logEvent("SUBMISSION_ATTEMPT", currentStudentId, mapOf("type" to "final"))
         } catch (e: Throwable) {
-            println("Tracking logEvent failed: ${e.message}")
+            log.warn("Tracking logEvent nije uspeo: ${e.message}")
         }
-        val currentProject = ProjectManager.getInstance().openProjects[0]
         ApplicationManager.getApplication().runWriteAction {
             FileDocumentManager.getInstance().saveAllDocuments()
         }
 
         ApplicationManager.getApplication().executeOnPooledThread {
-            studentService.setProjectRoot(currentProject.basePath)
+            studentService.setProjectRoot(project.basePath)
             val isPushSuccess = studentService.submitAssignment(true)
-            try {
-                trackingService.stopTracking(currentStudentId)
-            } catch (e: Throwable) {
-                println("Tracking stopTracking failed: ${e.message}")
-            }
 
             if (isPushSuccess) {
-                val studentId =
-                    "${studentsStudyProgramTF.text}-${studentsIndexNumberTF.text}-${studentsStartYearTF.text}"
+                StudentTrackingSession.getInstance(project).finishAndStop()
                 try {
-                    FeedbackDashboard(project, studentId).finish()
+                    trackingService.stopTracking(currentStudentId)
                 } catch (e: Throwable) {
-                    println("=== FeedbackDashboard finish FAILED: ${e.message} ===")
+                    log.warn("Tracking stopTracking nije uspeo: ${e.message}")
                 }
-
+                session.clear()
+                AssignmentLoader(project).deleteBackups()
                 ApplicationManager.getApplication().invokeLater {
                     finalSubmissionButton.isEnabled = false
-
                     JOptionPane.showMessageDialog(
                         null,
                         "Uspešno ste predali rad!",
@@ -325,7 +438,7 @@ class StudentFormPanel(
                     )
                 }
             } else {
-                println("Failed to push changes to new branch.")
+                log.warn("Predaja rada (push) nije uspela.")
                 ApplicationManager.getApplication().invokeLater {
                     JOptionPane.showMessageDialog(
                         null,
