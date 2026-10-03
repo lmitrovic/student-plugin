@@ -21,7 +21,11 @@ import java.awt.Dimension
 import java.awt.Font
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import javax.swing.*
 
 class StudentFormPanel(private val project: Project) {
@@ -237,6 +241,22 @@ class StudentFormPanel(private val project: Project) {
 
         val downloadPath = Paths.get(System.getProperty("user.home"), RafConfig.DOWNLOAD_FOLDER_NAME)
         if (Files.exists(downloadPath)) {
+            // RISK-22 fix: napraviti backup sa vremenskom oznakom pre brisanja.
+            // Ako backup ne uspe, prekinuti i obavestiti studenta umesto da se gubi rad.
+            val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+            val backupPath = Paths.get(System.getProperty("user.home"), "${RafConfig.DOWNLOAD_FOLDER_NAME}_backup_$timestamp")
+            try {
+                copyDirectoryRecursively(downloadPath, backupPath)
+            } catch (e: Exception) {
+                log.error("RISK-22: backup nije uspeo pre brisanja projekta", e)
+                JOptionPane.showMessageDialog(
+                    null,
+                    "Pravljenje rezervne kopije nije uspelo.\nPreuzimanje je prekinuto radi zastite vaseg rada.\n\nDetalji: ${e.message}",
+                    "Greška — rezervna kopija nije napravljena",
+                    JOptionPane.ERROR_MESSAGE
+                )
+                return
+            }
             downloadPath.toFile().listFiles()?.forEach { it.deleteRecursively() }
         } else {
             Files.createDirectory(downloadPath)
@@ -446,6 +466,20 @@ class StudentFormPanel(private val project: Project) {
                         "Greška",
                         JOptionPane.INFORMATION_MESSAGE
                     )
+                }
+            }
+        }
+    }
+
+    // RISK-22 fix: rekurzivno kopiranje direktorijuma za backup pre brisanja.
+    private fun copyDirectoryRecursively(source: Path, target: Path) {
+        Files.walk(source).use { stream ->
+            stream.forEach { src ->
+                val dest = target.resolve(source.relativize(src))
+                if (Files.isDirectory(src)) {
+                    Files.createDirectories(dest)
+                } else {
+                    Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING)
                 }
             }
         }
