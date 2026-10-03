@@ -300,7 +300,36 @@ class StudentFormPanel(private val project: Project) {
                         term = studentsTermCB.selectedItem?.toString().orEmpty()
                     })
 
-                    StudentTrackingSession.getInstance(project).start(trackingService, studentId, taskId)
+                    // RISK-16 fix: tražimo saglasnost studenta pre nego što počne praćenje
+                    val consentMessage = """
+                        <html><body style='width:350px'>
+                        <b>Praćenje aktivnosti</b><br><br>
+                        Tokom testa, plugin prikuplja podatke o vašem radu:<br>
+                        &bull; Tipovi grešaka (kategorija, ne tekst)<br>
+                        &bull; Korišćenje autocomplete-a (tip, ne sadržaj)<br>
+                        &bull; Relativne putanje fajlova unutar projekta<br>
+                        &bull; Dužina zalepljenog teksta (broj karaktera, ne sadržaj)<br><br>
+                        Podaci se čuvaju 90 dana i koriste isključivo za analizu napretka.<br><br>
+                        Da li pristajete na prikupljanje podataka?
+                        </body></html>
+                    """.trimIndent()
+                    val consent = JOptionPane.showConfirmDialog(
+                        null,
+                        consentMessage,
+                        "Saglasnost za praćenje aktivnosti",
+                        JOptionPane.YES_NO_OPTION,
+                        JOptionPane.INFORMATION_MESSAGE
+                    )
+                    if (consent != JOptionPane.YES_OPTION) {
+                        JOptionPane.showMessageDialog(
+                            null,
+                            "Praćenje aktivnosti nije aktivirano. Možete nastaviti bez praćenja.",
+                            "Praćenje nije aktivirano",
+                            JOptionPane.WARNING_MESSAGE
+                        )
+                    } else {
+                        StudentTrackingSession.getInstance(project).start(trackingService, studentId, taskId)
+                    }
 
                     AssignmentLoader(project).copyAndLoad()
                     disableFormFields()
