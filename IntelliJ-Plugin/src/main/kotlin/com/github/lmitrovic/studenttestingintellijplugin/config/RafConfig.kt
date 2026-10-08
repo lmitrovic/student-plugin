@@ -12,6 +12,13 @@ object RafConfig {
     /** Bazni URL RAF LMS servera za feedback/metrike i proveru verzije plugina. */
     const val SERVER_BASE_URL: String = "http://157.180.37.247"
 
+    /**
+     * Bearer token za autentifikaciju ka serverapi i activitytrackingapi.
+     * Mora da odgovara RAF_AUTH_TOKEN env varijabli na serveru.
+     * Ažurirati pre svakog build-a plugina.
+     */
+    const val AUTH_TOKEN: String = "b4d8d3659020957d952c53b5302b4444aa1d733304f144aab4ca225847cd0649"
+
     /** Folder u home direktorijumu u koji se privremeno skida zadatak. */
     const val DOWNLOAD_FOLDER_NAME: String = "student-plugin-temp"
 

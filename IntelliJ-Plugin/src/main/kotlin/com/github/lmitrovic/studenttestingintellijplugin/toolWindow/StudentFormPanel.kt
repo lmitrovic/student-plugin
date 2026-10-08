@@ -21,7 +21,11 @@ import java.awt.Dimension
 import java.awt.Font
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import javax.swing.*
 
 class StudentFormPanel(private val project: Project) {
@@ -237,6 +241,22 @@ class StudentFormPanel(private val project: Project) {
 
         val downloadPath = Paths.get(System.getProperty("user.home"), RafConfig.DOWNLOAD_FOLDER_NAME)
         if (Files.exists(downloadPath)) {
+            // RISK-22 fix: napraviti backup sa vremenskom oznakom pre brisanja.
+            // Ako backup ne uspe, prekinuti i obavestiti studenta umesto da se gubi rad.
+            val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+            val backupPath = Paths.get(System.getProperty("user.home"), "${RafConfig.DOWNLOAD_FOLDER_NAME}_backup_$timestamp")
+            try {
+                copyDirectoryRecursively(downloadPath, backupPath)
+            } catch (e: Exception) {
+                log.error("RISK-22: backup nije uspeo pre brisanja projekta", e)
+                JOptionPane.showMessageDialog(
+                    null,
+                    "Pravljenje rezervne kopije nije uspelo.\nPreuzimanje je prekinuto radi zastite vaseg rada.\n\nDetalji: ${e.message}",
+                    "Greška — rezervna kopija nije napravljena",
+                    JOptionPane.ERROR_MESSAGE
+                )
+                return
+            }
             downloadPath.toFile().listFiles()?.forEach { it.deleteRecursively() }
         } else {
             Files.createDirectory(downloadPath)
@@ -280,7 +300,36 @@ class StudentFormPanel(private val project: Project) {
                         term = studentsTermCB.selectedItem?.toString().orEmpty()
                     })
 
-                    StudentTrackingSession.getInstance(project).start(trackingService, studentId, taskId)
+                    // RISK-16 fix: tražimo saglasnost studenta pre nego što počne praćenje
+                    val consentMessage = """
+                        <html><body style='width:350px'>
+                        <b>Praćenje aktivnosti</b><br><br>
+                        Tokom testa, plugin prikuplja podatke o vašem radu:<br>
+                        &bull; Tipovi grešaka (kategorija, ne tekst)<br>
+                        &bull; Korišćenje autocomplete-a (tip, ne sadržaj)<br>
+                        &bull; Relativne putanje fajlova unutar projekta<br>
+                        &bull; Dužina zalepljenog teksta (broj karaktera, ne sadržaj)<br><br>
+                        Podaci se čuvaju 90 dana i koriste isključivo za analizu napretka.<br><br>
+                        Da li pristajete na prikupljanje podataka?
+                        </body></html>
+                    """.trimIndent()
+                    val consent = JOptionPane.showConfirmDialog(
+                        null,
+                        consentMessage,
+                        "Saglasnost za praćenje aktivnosti",
+                        JOptionPane.YES_NO_OPTION,
+                        JOptionPane.INFORMATION_MESSAGE
+                    )
+                    if (consent != JOptionPane.YES_OPTION) {
+                        JOptionPane.showMessageDialog(
+                            null,
+                            "Praćenje aktivnosti nije aktivirano. Možete nastaviti bez praćenja.",
+                            "Praćenje nije aktivirano",
+                            JOptionPane.WARNING_MESSAGE
+                        )
+                    } else {
+                        StudentTrackingSession.getInstance(project).start(trackingService, studentId, taskId)
+                    }
 
                     AssignmentLoader(project).copyAndLoad()
                     disableFormFields()
@@ -446,6 +495,20 @@ class StudentFormPanel(private val project: Project) {
                         "Greška",
                         JOptionPane.INFORMATION_MESSAGE
                     )
+                }
+            }
+        }
+    }
+
+    // RISK-22 fix: rekurzivno kopiranje direktorijuma za backup pre brisanja.
+    private fun copyDirectoryRecursively(source: Path, target: Path) {
+        Files.walk(source).use { stream ->
+            stream.forEach { src ->
+                val dest = target.resolve(source.relativize(src))
+                if (Files.isDirectory(src)) {
+                    Files.createDirectories(dest)
+                } else {
+                    Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING)
                 }
             }
         }
