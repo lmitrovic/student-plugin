@@ -10,7 +10,7 @@ package com.github.lmitrovic.studenttestingintellijplugin.config
 object RafConfig {
 
     /** Bazni URL RAF LMS servera za feedback/metrike i proveru verzije plugina. */
-    const val SERVER_BASE_URL: String = "http://157.180.37.247"
+    const val SERVER_BASE_URL: String = "http://192.168.124.24:8092"
 
     /**
      * Bearer token za autentifikaciju ka serverapi i activitytrackingapi.
