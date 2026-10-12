@@ -7,8 +7,33 @@ on:
       - completed
 
 jobs:
-  deploy:
+  # 0. Provera da li je bump zaista odrađen (a ne preskočen)
+  check-bump:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      bumped: ${{ steps.check.outputs.bumped }}
+    steps:
+      - name: Proveri status bump-version job-a
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CONCLUSION=$(gh api \
+            repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/jobs \
+            --jq '.jobs[] | select(.name == "bump-version") | .conclusion')
+          echo "bump-version conclusion: $CONCLUSION"
+          if [ "$CONCLUSION" = "success" ]; then
+            echo "bumped=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    needs: check-bump
+    if: needs.check-bump.outputs.bumped == 'true'
     runs-on: ubuntu-latest
 
     env:
