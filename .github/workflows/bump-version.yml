@@ -7,7 +7,7 @@ on:
 
 jobs:
   bump-version:
-
+    # Samo spojeni PR, ne i zatvoren bez merge-a
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
 
@@ -68,7 +68,7 @@ jobs:
 
       - name: Commit and push changes
         if: success()
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@b863ae1933cb653a53c021fe36dbb774e1fb9403 # v5.2.0
         with:
           commit_message: 'Bump pluginVersion after merge to prod'
           branch: prod  # Push na prod granu
