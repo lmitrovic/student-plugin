@@ -10,7 +10,14 @@ package com.github.lmitrovic.studenttestingintellijplugin.config
 object RafConfig {
 
     /** Bazni URL RAF LMS servera za feedback/metrike i proveru verzije plugina. */
-    const val SERVER_BASE_URL: String = "http://157.180.37.247"
+    const val SERVER_BASE_URL: String = "http://192.168.124.24:8092"
+
+    /**
+     * Bearer token za autentifikaciju ka serverapi i activitytrackingapi.
+     * Mora da odgovara RAF_AUTH_TOKEN env varijabli na serveru.
+     * Ažurirati pre svakog build-a plugina.
+     */
+    const val AUTH_TOKEN: String = "b4d8d3659020957d952c53b5302b4444aa1d733304f144aab4ca225847cd0649"
 
     /** Folder u home direktorijumu u koji se privremeno skida zadatak. */
     const val DOWNLOAD_FOLDER_NAME: String = "student-plugin-temp"
@@ -22,7 +29,7 @@ object RafConfig {
     const val BACKUP_FOLDER_NAME: String = ".raf-lms-backup"
 
     /** Pretpostavljeno trajanje kolokvijuma u minutima (feedback prozor). */
-    const val EXAM_DURATION_MINUTES: Int = 180
+    const val EXAM_DURATION_MINUTES: Int = 120
 
     /** Interval slanja feedback metrika, u milisekundama. */
     const val FEEDBACK_INTERVAL_MS: Int = 20_000

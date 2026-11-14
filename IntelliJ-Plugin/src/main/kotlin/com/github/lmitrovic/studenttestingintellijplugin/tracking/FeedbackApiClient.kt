@@ -22,6 +22,7 @@ class FeedbackApiClient {
     private fun post(url: String, body: String) {
         try {
             HttpRequests.post(url, "application/json")
+                .tuner { conn -> conn.setRequestProperty("Authorization", "Bearer ${RafConfig.AUTH_TOKEN}") }
                 .connectTimeout(RafConfig.HTTP_CONNECT_TIMEOUT_MS)
                 .readTimeout(RafConfig.HTTP_READ_TIMEOUT_MS)
                 .connect { request ->

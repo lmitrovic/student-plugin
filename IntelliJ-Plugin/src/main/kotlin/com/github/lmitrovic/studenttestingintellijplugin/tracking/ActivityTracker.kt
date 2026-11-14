@@ -30,10 +30,9 @@ import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.openapi.wm.WindowManager
 import raflms.trackingstub.api.TrackingStubService
-import java.awt.Toolkit
-import java.awt.datatransfer.DataFlavor
 import java.awt.event.WindowEvent
 import java.awt.event.WindowFocusListener
 import javax.swing.Timer
@@ -253,23 +252,26 @@ class ActivityTracker(
                             val currentEditor = FileEditorManager.getInstance(project)
                                 .selectedTextEditor ?: return@invokeLater
 
-                            val file = FileDocumentManager.getInstance()
-                                .getFile(currentEditor.document)?.name ?: "unknown"
+                            val vFile = FileDocumentManager.getInstance()
+                                .getFile(currentEditor.document)
+                            // RISK-14: relativna putanja; RISK-15: tip greske, ne tekst poruke
+                            val fileName = vFile?.let { relativePath(it) } ?: "unknown"
 
                             EditorErrors.errorHighlights(project, currentEditor.document).forEach { highlight ->
-                                val errorMessage = highlight.description ?: return@forEach
-                                val throttleKey = "$file:$errorMessage"
+                                val throttleKey = "$fileName:${highlight.startOffset}"
                                 val now = System.currentTimeMillis()
                                 val last = lastErrorTime[throttleKey] ?: 0L
                                 if (now - last >= errorThrottleMs) {
                                     lastErrorTime[throttleKey] = now
                                     val line = currentEditor.document.getLineNumber(highlight.startOffset) + 1
+                                    val errorCategory = highlight.description
+                                        ?.let { categorizeError(it) } ?: "UNKNOWN"
                                     safeLog {
                                         trackingService.logEvent(
                                             "ERROR_DETECTED", studentId,
                                             mapOf(
-                                                "file" to file,
-                                                "errorMessage" to errorMessage,
+                                                "file" to fileName,
+                                                "errorCategory" to errorCategory,
                                                 "line" to line
                                             )
                                         )
@@ -296,7 +298,7 @@ class ActivityTracker(
                     safeLog {
                         trackingService.logEvent(
                             "FILE_OPENED", studentId,
-                            mapOf("filePath" to file.path, "fileType" to (file.extension ?: "unknown"))
+                            mapOf("filePath" to relativePath(file), "fileType" to (file.extension ?: "unknown"))
                         )
                     }
                 }
@@ -307,7 +309,7 @@ class ActivityTracker(
                     safeLog {
                         trackingService.logEvent(
                             "FILE_CLOSED", studentId,
-                            mapOf("filePath" to file.path, "timeOpenSeconds" to timeOpenSeconds)
+                            mapOf("filePath" to relativePath(file), "timeOpenSeconds" to timeOpenSeconds)
                         )
                     }
                 }
@@ -357,7 +359,7 @@ class ActivityTracker(
                 override fun documentChanged(e: DocumentEvent) {
                     try {
                         val file = FileDocumentManager.getInstance().getFile(editor.document)
-                        val filePath = file?.path ?: "unknown"
+                        val filePath = file?.let { relativePath(it) } ?: "unknown"
                         val stats = pending.getOrPut(filePath) { FileStats() }
                         val oldText = e.oldFragment.toString()
                         val newText = e.newFragment.toString()
@@ -377,7 +379,9 @@ class ActivityTracker(
         var consecutiveUndos = 0
         var lastActionId = ""
         var pendingCopyLength = 0
-        var pendingPasteLength = 0
+        // RISK-13 fix: ne citamo sistemski clipboard (sadrzaj van IDE-a).
+        // Duzinu paste-a merimo iz razlike duzine dokumenta pre i posle akcije.
+        var docLengthBeforePaste = 0
 
         ApplicationManager.getApplication().messageBus.connect(parentDisposable).subscribe(
             AnActionListener.TOPIC,
@@ -388,10 +392,7 @@ class ActivityTracker(
                         val editor = event.getData(CommonDataKeys.EDITOR) ?: return
                         when (actionId) {
                             "\$Copy" -> pendingCopyLength = editor.selectionModel.selectedText?.length ?: 0
-                            "\$Paste" -> pendingPasteLength = try {
-                                (Toolkit.getDefaultToolkit().systemClipboard
-                                    .getData(DataFlavor.stringFlavor) as? String)?.length ?: 0
-                            } catch (_: Exception) { 0 }
+                            "\$Paste" -> docLengthBeforePaste = editor.document.textLength
                         }
                     } catch (e: Throwable) {
                         log.warn("ActivityTracker: editorAction beforeActionPerformed nije uspeo: ${e.message}")
@@ -404,14 +405,17 @@ class ActivityTracker(
                         val actionId = ActionManager.getInstance().getId(action) ?: return
                         val editor = event.getData(CommonDataKeys.EDITOR)
                         val file = editor?.let { FileDocumentManager.getInstance().getFile(it.document) }
-                        val filePath = file?.path ?: "unknown"
+                        val filePath = file?.let { relativePath(it) } ?: "unknown"
 
                         when {
                             actionId == "\$Copy" -> safeLog {
                                 trackingService.logEvent("COPY_ACTION", studentId, mapOf("filePath" to filePath, "length" to pendingCopyLength))
                             }
-                            actionId == "\$Paste" -> safeLog {
-                                trackingService.logEvent("PASTE_ACTION", studentId, mapOf("filePath" to filePath, "length" to pendingPasteLength))
+                            actionId == "\$Paste" -> {
+                                val pasteLength = maxOf(0, (editor?.document?.textLength ?: docLengthBeforePaste) - docLengthBeforePaste)
+                                safeLog {
+                                    trackingService.logEvent("PASTE_ACTION", studentId, mapOf("filePath" to filePath, "length" to pasteLength))
+                                }
                             }
                             actionId == "\$Undo" -> {
                                 consecutiveUndos = if (lastActionId == "\$Undo") consecutiveUndos + 1 else 1
@@ -446,13 +450,24 @@ class ActivityTracker(
                     newLookup?.addLookupListener(object : LookupListener {
                         override fun itemSelected(event: LookupEvent) {
                             try {
-                                val completion = event.item?.lookupString ?: return
+                                val item = event.item ?: return
                                 val file = FileDocumentManager.getInstance().getFile(newLookup.editor.document)
-                                val filePath = file?.path ?: "unknown"
+                                val filePath = file?.let { relativePath(it) } ?: "unknown"
+                                // RISK-15 fix: saljemo tip dopune (METHOD/FIELD/CLASS/KEYWORD/OTHER),
+                                // ne sam string - koji bi otkrio kod studenta
+                                val completionType = item.psiElement?.let { psi ->
+                                    when (psi::class.simpleName) {
+                                        "PsiMethod", "KtFunction" -> "METHOD"
+                                        "PsiField", "KtProperty" -> "FIELD"
+                                        "PsiClass", "KtClass" -> "CLASS"
+                                        "PsiKeyword" -> "KEYWORD"
+                                        else -> "OTHER"
+                                    }
+                                } ?: "OTHER"
                                 safeLog {
                                     trackingService.logEvent(
                                         "AUTOCOMPLETE_USED", studentId,
-                                        mapOf("filePath" to filePath, "completion" to completion)
+                                        mapOf("filePath" to filePath, "completionType" to completionType)
                                     )
                                 }
                             } catch (e: Throwable) {
@@ -503,6 +518,27 @@ class ActivityTracker(
     private fun startTimer(timer: Timer) {
         Disposer.register(parentDisposable) { timer.stop() }
         timer.start()
+    }
+
+    // RISK-15 fix: kategorise greske bez slanja teksta poruke (koji sadrzi imena promenljivih).
+    private fun categorizeError(message: String): String = when {
+        message.contains("cannot find symbol", ignoreCase = true) ||
+        message.contains("unresolved reference", ignoreCase = true) -> "UNRESOLVED_SYMBOL"
+        message.contains("incompatible types", ignoreCase = true) ||
+        message.contains("type mismatch", ignoreCase = true) -> "TYPE_ERROR"
+        message.contains("';' expected", ignoreCase = true) ||
+        message.contains("syntax error", ignoreCase = true) -> "SYNTAX_ERROR"
+        message.contains("null pointer", ignoreCase = true) ||
+        message.contains("nullable", ignoreCase = true) -> "NULL_SAFETY"
+        message.contains("unused", ignoreCase = true) -> "UNUSED_SYMBOL"
+        else -> "OTHER"
+    }
+
+    // RISK-14 fix: vraca putanju relativnu u odnosu na koren projekta umesto apsolutne.
+    // Apsolutna putanja (/Users/marko.petrovic/...) otkriva korisnicko ime na privatnom racunaru.
+    private fun relativePath(file: VirtualFile): String {
+        val projectBase = project.baseDir ?: return file.name
+        return VfsUtilCore.getRelativePath(file, projectBase) ?: file.name
     }
 
     private fun isSearchAction(actionId: String): Boolean {
