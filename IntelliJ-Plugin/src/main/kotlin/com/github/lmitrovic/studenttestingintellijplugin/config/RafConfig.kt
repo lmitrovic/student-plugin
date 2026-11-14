@@ -29,7 +29,7 @@ object RafConfig {
     const val BACKUP_FOLDER_NAME: String = ".raf-lms-backup"
 
     /** Pretpostavljeno trajanje kolokvijuma u minutima (feedback prozor). */
-    const val EXAM_DURATION_MINUTES: Int = 180
+    const val EXAM_DURATION_MINUTES: Int = 120
 
     /** Interval slanja feedback metrika, u milisekundama. */
     const val FEEDBACK_INTERVAL_MS: Int = 20_000
